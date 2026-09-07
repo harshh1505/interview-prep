@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Inter:wght@400;500;600&display=swap");
+
+body {
+  background-color: #0f1626;
+  color: #f4f0e4;
+}
+
+::selection {
+  background-color: #c88a2e;
+  color: #0f1626;
+}
