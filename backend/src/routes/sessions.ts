@@ -1,66 +1,90 @@
 import { Router } from "express";
 import { z } from "zod";
-import { supabase } from "../lib/supabase.js";
-import { generateQuestions } from "../lib/llm.js";
+import { storage } from "../lib/storage.js";
+import { generateQuestions } from "../lib/gemini.js";
+import { queryResumeContext } from "../lib/pinecone.js";
 
 export const sessionsRouter = Router();
 
 const createSessionSchema = z.object({
-  userId: z.string().uuid(),
+  userId: z.string().optional().default("00000000-0000-0000-0000-000000000000"),
   role: z.string().min(2),
   domain: z.string().optional(),
+  difficulty: z.enum(["entry", "mid", "senior"]).optional().default("mid"),
   useResume: z.boolean().optional().default(false),
-  questionCount: z.number().int().min(3).max(15).optional().default(5),
+  questionCount: z.number().int().min(2).max(15).optional().default(5),
 });
 
 /**
  * POST /api/sessions
- * Creates a new mock interview session and generates its questions.
+ * Creates a new mock interview session and generates questions grounded in
+ * Pinecone resume chunks and role context via Google Gemini.
  */
 sessionsRouter.post("/", async (req, res) => {
   const parseResult = createSessionSchema.safeParse(req.body);
   if (!parseResult.success) {
     return res.status(400).json({ error: parseResult.error.flatten() });
   }
-  const { userId, role, domain, useResume, questionCount } = parseResult.data;
+
+  const { userId, role, domain, difficulty, useResume, questionCount } = parseResult.data;
 
   try {
+    let resumeChunks: string[] = [];
     let resumeText: string | undefined;
+
     if (useResume) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("resume_text")
-        .eq("id", userId)
-        .single();
-      resumeText = profile?.resume_text ?? undefined;
+      console.log(`[Sessions] Querying Pinecone vector store for candidate resume context (${role})...`);
+      const retrieved = await queryResumeContext({
+        userId,
+        query: `${role} ${domain || ""} key projects technologies architecture accomplishments technical challenges`,
+        topK: 6,
+      });
+
+      if (retrieved.length > 0) {
+        resumeChunks = retrieved.map((r) => r.text);
+        console.log(`[Sessions] Retrieved ${retrieved.length} relevant resume chunks from Pinecone vectors.`);
+      } else {
+        const profile = await storage.getProfile(userId);
+        resumeText = profile?.resume_text || undefined;
+      }
     }
 
-    const { data: session, error: sessionError } = await supabase
-      .from("sessions")
-      .insert({ user_id: userId, role, domain })
-      .select()
-      .single();
-    if (sessionError) throw sessionError;
+    // Create session record in storage
+    const session = await storage.createSession({ userId, role, domain });
 
-    const generated = await generateQuestions({ role, domain, resumeText, count: questionCount });
+    // Generate questions with Google Gemini
+    const generated = await generateQuestions({
+      role,
+      domain,
+      difficulty,
+      resumeChunks,
+      resumeText,
+      count: questionCount,
+    });
 
-    const rows = generated.map((q, i) => ({
+    // Save questions with rubric and resume metadata
+    const questionRows = generated.map((q, i) => ({
       session_id: session.id,
       order_index: i,
       prompt: q.prompt,
       category: q.category,
+      tailored_from_resume: q.tailoredFromResume,
+      resume_snippet: q.resumeContextSnippet,
+      rubric_criteria: q.rubricCriteria,
     }));
 
-    const { data: questions, error: questionsError } = await supabase
-      .from("questions")
-      .insert(rows)
-      .select();
-    if (questionsError) throw questionsError;
+    const questions = await storage.insertQuestions(questionRows);
 
-    res.status(201).json({ session, questions });
+    res.status(201).json({
+      session,
+      questions,
+      retrievedChunksCount: resumeChunks.length,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to create session" });
+    console.error("Session creation error:", err);
+    res.status(500).json({
+      error: err instanceof Error ? err.message : "Failed to create session and generate questions",
+    });
   }
 });
 
@@ -71,41 +95,39 @@ sessionsRouter.post("/", async (req, res) => {
 sessionsRouter.get("/:id", async (req, res) => {
   const { id } = req.params;
   try {
-    const { data: session, error: sessionError } = await supabase
-      .from("sessions")
-      .select("*")
-      .eq("id", id)
-      .single();
-    if (sessionError) throw sessionError;
+    const session = await storage.getSession(id);
+    if (!session) {
+      return res.status(404).json({ error: "Session not found" });
+    }
 
-    const { data: questions, error: questionsError } = await supabase
-      .from("questions")
-      .select("*, answers(*)")
-      .eq("session_id", id)
-      .order("order_index");
-    if (questionsError) throw questionsError;
+    const questions = await storage.getQuestions(id);
+    const answers = await storage.getAnswers(id);
 
-    res.json({ session, questions });
+    // Merge answers into questions
+    const questionsWithAnswers = questions.map((q) => ({
+      ...q,
+      answers: answers.filter((a) => a.question_id === q.id),
+    }));
+
+    res.json({ session, questions: questionsWithAnswers });
   } catch (err) {
-    console.error(err);
-    res.status(404).json({ error: "Session not found" });
+    console.error("Get session error:", err);
+    res.status(500).json({ error: "Failed to load session" });
   }
 });
 
 /**
  * GET /api/sessions?userId=...
- * Returns a user's session history for the progress-tracking dashboard.
+ * Returns a user's session history.
  */
 sessionsRouter.get("/", async (req, res) => {
-  const userId = req.query.userId as string | undefined;
-  if (!userId) return res.status(400).json({ error: "userId query param is required" });
+  const userId = (req.query.userId as string) || "00000000-0000-0000-0000-000000000000";
 
-  const { data, error } = await supabase
-    .from("sessions")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (error) return res.status(500).json({ error: "Failed to fetch sessions" });
-  res.json({ sessions: data });
+  try {
+    const sessions = await storage.listSessions(userId);
+    res.json({ sessions });
+  } catch (err) {
+    console.error("List sessions error:", err);
+    res.status(500).json({ error: "Failed to fetch sessions" });
+  }
 });

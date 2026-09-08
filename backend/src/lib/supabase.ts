@@ -1,17 +1,25 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!supabaseUrl || !supabaseServiceRoleKey) {
-  throw new Error(
-    "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Copy .env.example to .env and fill them in."
-  );
+let client: SupabaseClient | null = null;
+
+if (
+  supabaseUrl &&
+  supabaseServiceRoleKey &&
+  supabaseUrl.startsWith("http") &&
+  !supabaseUrl.includes("your-project")
+) {
+  try {
+    client = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false },
+    });
+  } catch (err) {
+    console.warn("Supabase init warning:", err);
+  }
 }
 
-// Service-role client: used only on the backend, never exposed to the browser.
-// Row Level Security policies still apply to any user-scoped queries you add
-// via the user's own JWT; this client bypasses RLS for trusted server logic.
-export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
-  auth: { persistSession: false },
-});
+// Fallback proxy or null-safe export
+export const supabase = client as unknown as SupabaseClient;
+export const isSupabaseConfigured = Boolean(client);

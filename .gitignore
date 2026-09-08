@@ -19,6 +19,9 @@ build/
 .env.production.local
 !*.example
 
+# Local runtime data
+backend/data/*.json
+
 # TypeScript cache
 *.tsbuildinfo
 
