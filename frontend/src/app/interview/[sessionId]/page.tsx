@@ -11,6 +11,13 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [index, setIndex] = useState(0);
   const [answerText, setAnswerText] = useState("");
+  const answerTextRef = useRef(answerText);
+  const baseTextRef = useRef("");
+
+  useEffect(() => {
+    answerTextRef.current = answerText;
+  }, [answerText]);
+
   const [result, setResult] = useState<Answer | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -62,23 +69,35 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
         recognizer.interimResults = true;
         recognizer.lang = "en-US";
 
-        recognizer.onresult = (event: { resultIndex: number; results: { isFinal: boolean; 0: { transcript: string } }[] }) => {
-          let currentTranscript = "";
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            currentTranscript += event.results[i][0].transcript;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        recognizer.onresult = (event: any) => {
+          let finalTranscript = "";
+          let interimTranscript = "";
+
+          for (let i = 0; i < event.results.length; i++) {
+            const item = event.results[i];
+            if (item.isFinal) {
+              finalTranscript += item[0].transcript + " ";
+            } else {
+              interimTranscript += item[0].transcript;
+            }
           }
-          if (currentTranscript.trim()) {
-            setAnswerText((prev) => (prev ? `${prev.trim()} ${currentTranscript.trim()}` : currentTranscript.trim()));
-          }
+
+          const base = baseTextRef.current ? baseTextRef.current.trim() : "";
+          const spoken = (finalTranscript + interimTranscript).trim();
+          const combined = base && spoken ? `${base} ${spoken}` : base || spoken;
+          setAnswerText(combined);
         };
 
         recognizer.onerror = (err: unknown) => {
           console.warn("Speech recognition error:", err);
           setIsListening(false);
+          baseTextRef.current = answerTextRef.current;
         };
 
         recognizer.onend = () => {
           setIsListening(false);
+          baseTextRef.current = answerTextRef.current;
         };
 
         recognitionRef.current = recognizer;
@@ -161,6 +180,7 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
           // If auto-listen is on, start user mic
           if (autoListenAfterQuestion && recognitionRef.current) {
             try {
+              baseTextRef.current = answerTextRef.current;
               recognitionRef.current.start();
               setIsListening(true);
             } catch (e) {
@@ -183,6 +203,7 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
       speakText(current.prompt, () => {
         if (autoListenAfterQuestion && recognitionRef.current) {
           try {
+            baseTextRef.current = answerTextRef.current;
             recognitionRef.current.start();
             setIsListening(true);
           } catch (e) {
@@ -202,6 +223,7 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
     speakText(current.prompt, () => {
       if (autoListenAfterQuestion && recognitionRef.current) {
         try {
+          baseTextRef.current = answerTextRef.current;
           recognitionRef.current.start();
           setIsListening(true);
         } catch (e) {
@@ -217,9 +239,11 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
     if (isListening) {
       rec.stop();
       setIsListening(false);
+      baseTextRef.current = answerTextRef.current;
     } else {
       stopAgentSpeech();
       try {
+        baseTextRef.current = answerTextRef.current;
         rec.start();
         setIsListening(true);
       } catch (e) {
@@ -271,6 +295,7 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
     stopAgentSpeech();
     setResult(null);
     setAnswerText("");
+    baseTextRef.current = "";
     setShowSnippet(false);
     setSecondsElapsed(0);
     setIsTimerActive(true);
@@ -533,7 +558,10 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
             <div className="relative">
               <textarea
                 value={answerText}
-                onChange={(e) => setAnswerText(e.target.value)}
+                onChange={(e) => {
+                  setAnswerText(e.target.value);
+                  baseTextRef.current = e.target.value;
+                }}
                 rows={8}
                 placeholder="Speak out loud into your microphone, or type your response here..."
                 className="w-full rounded border border-chalk-200/20 bg-ink-900 p-4 font-sans text-sm text-chalk-50 placeholder:text-chalk-200/30 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 leading-relaxed"
@@ -566,9 +594,23 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
             )}
 
             <div className="flex items-center justify-between pt-2">
-              <span className="font-sans text-xs text-chalk-200/50">
-                {answerText.trim() ? `${answerText.trim().split(/\s+/).length} words recorded` : "Speak clearly into your microphone"}
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="font-sans text-xs text-chalk-200/50">
+                  {answerText.trim() ? `${answerText.trim().split(/\s+/).length} words recorded` : "Speak clearly into your microphone"}
+                </span>
+                {answerText.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAnswerText("");
+                      baseTextRef.current = "";
+                    }}
+                    className="font-sans text-xs text-clay-400 hover:text-clay-300 underline transition cursor-pointer"
+                  >
+                    Clear text
+                  </button>
+                )}
+              </div>
 
               <button
                 onClick={handleSubmit}
