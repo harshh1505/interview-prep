@@ -21,6 +21,8 @@ build/
 
 # Local runtime data
 backend/data/*.json
+frontend/data/*.json
+data/
 
 # TypeScript cache
 *.tsbuildinfo
