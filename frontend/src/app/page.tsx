@@ -1,6 +1,15 @@
 import Link from "next/link";
+import { createSupabaseServerClient } from "@/lib/supabase-server";
 
-export default function HomePage() {
+export default async function HomePage() {
+  let isLoggedIn = false;
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    isLoggedIn = Boolean(user);
+  } catch {
+    // env vars not set yet — show logged-out state
+  }
   return (
     <main className="min-h-screen bg-ink-950 text-chalk-100 selection:bg-amber-500 selection:text-ink-950">
       {/* Top Header */}
@@ -10,18 +19,37 @@ export default function HomePage() {
             Rehearsal <span className="text-xs font-sans font-normal tracking-wide text-amber-500 uppercase px-2 py-0.5 border border-amber-500/30 rounded-full ml-2">Gemini + Pinecone</span>
           </span>
           <div className="flex items-center gap-4">
-            <Link
-              href="/dashboard"
-              className="font-sans text-xs text-chalk-200/70 hover:text-chalk-50 transition"
-            >
-              Dashboard
-            </Link>
-            <Link
-              href="/upload"
-              className="rounded border border-amber-500 bg-amber-500 px-4 py-2 font-sans text-xs font-semibold text-ink-950 hover:bg-amber-400 transition"
-            >
-              Start Session →
-            </Link>
+            {isLoggedIn ? (
+              <>
+                <Link
+                  href="/dashboard"
+                  className="font-sans text-xs text-chalk-200/70 hover:text-chalk-50 transition"
+                >
+                  Dashboard
+                </Link>
+                <Link
+                  href="/upload"
+                  className="rounded border border-amber-500 bg-amber-500 px-4 py-2 font-sans text-xs font-semibold text-ink-950 hover:bg-amber-400 transition"
+                >
+                  Start Session →
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  className="font-sans text-xs text-chalk-200/70 hover:text-chalk-50 transition"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  href="/signup"
+                  className="rounded border border-amber-500 bg-amber-500 px-4 py-2 font-sans text-xs font-semibold text-ink-950 hover:bg-amber-400 transition"
+                >
+                  Get Started →
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>

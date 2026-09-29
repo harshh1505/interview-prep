@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { checkApiHealth, createSession, uploadResume, type ApiHealth, type ResumeUploadResult } from "@/lib/api";
+import { createSupabaseClient } from "@/lib/supabase";
 
-const DEV_USER_ID = "00000000-0000-0000-0000-000000000000";
+const FALLBACK_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 const ROLE_PRESETS = [
   "Backend Engineer",
@@ -18,6 +19,7 @@ const ROLE_PRESETS = [
 
 export default function UploadPage() {
   const router = useRouter();
+  const [userId, setUserId] = useState(FALLBACK_USER_ID);
   const [role, setRole] = useState("");
   const [domain, setDomain] = useState("");
   const [difficulty, setDifficulty] = useState<"entry" | "mid" | "senior">("mid");
@@ -33,6 +35,12 @@ export default function UploadPage() {
   const [health, setHealth] = useState<ApiHealth | null>(null);
 
   useEffect(() => {
+    // Resolve authenticated user ID
+    const supabase = createSupabaseClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) setUserId(user.id);
+    });
+
     checkApiHealth()
       .then(setHealth)
       .catch((err) => console.warn("API health check:", err));
@@ -54,7 +62,7 @@ export default function UploadPage() {
       setTimeout(() => setIndexingProgress("Generating 768-dim embeddings via Gemini text-embedding-004..."), 1200);
       setTimeout(() => setIndexingProgress("Upserting vectors into Pinecone database..."), 2000);
 
-      const result = await uploadResume(DEV_USER_ID, selectedFile);
+      const result = await uploadResume(userId, selectedFile);
       setResumeResult(result);
       setIndexingProgress(null);
     } catch (err) {
@@ -78,7 +86,7 @@ export default function UploadPage() {
     try {
       const useResume = Boolean(resumeResult || file);
       const { session } = await createSession({
-        userId: DEV_USER_ID,
+        userId,
         role: role.trim(),
         domain: domain.trim() || undefined,
         difficulty,
