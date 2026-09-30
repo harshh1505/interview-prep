@@ -29,11 +29,12 @@ export interface DashboardStorageData {
 }
 
 export const DASHBOARD_STORAGE_KEY = "rehearsal_dashboard_data";
+export const DEMO_SHOWCASE_USER_ID = "00000000-0000-0000-0000-000000000000";
 
 export const DEFAULT_SHOWCASE_SESSIONS: EnrichedSession[] = [
   {
     id: "session-demo-001",
-    user_id: "00000000-0000-0000-0000-000000000000",
+    user_id: DEMO_SHOWCASE_USER_ID,
     role: "Full-Stack Engineer",
     domain: "Next.js, Node.js & Distributed Systems",
     status: "completed",
@@ -83,7 +84,7 @@ export const DEFAULT_SHOWCASE_SESSIONS: EnrichedSession[] = [
   },
   {
     id: "session-demo-002",
-    user_id: "00000000-0000-0000-0000-000000000000",
+    user_id: DEMO_SHOWCASE_USER_ID,
     role: "AI & Vector Search Specialist",
     domain: "Pinecone, Gemini RAG & Embeddings",
     status: "completed",
@@ -114,7 +115,7 @@ export const DEFAULT_SHOWCASE_SESSIONS: EnrichedSession[] = [
   },
   {
     id: "session-demo-003",
-    user_id: "00000000-0000-0000-0000-000000000000",
+    user_id: DEMO_SHOWCASE_USER_ID,
     role: "Backend Infrastructure",
     domain: "Distributed Queues & Microservices",
     status: "completed",
@@ -208,14 +209,60 @@ export function computeStatsFromSessions(sessions: EnrichedSession[]): Dashboard
   };
 }
 
+function getKey(userId?: string) {
+  return userId ? `${DASHBOARD_STORAGE_KEY}_${userId}` : DASHBOARD_STORAGE_KEY;
+}
+
 /**
- * Get stored dashboard data from localStorage.
- * If empty, seeds with default showcase data and persists it.
+ * Get stored dashboard data for a specific user from localStorage.
+ * For the demo persona (Harsh), pre-seeds with showcase data.
+ * For any newly created user, provides a fresh start (0 sessions).
  */
 export function getStoredDashboardData(userId?: string): DashboardStorageData {
+  const isDemoUser = !userId || userId === DEMO_SHOWCASE_USER_ID;
+  const storageKey = getKey(userId);
+
   if (typeof window === "undefined") {
+    if (isDemoUser) {
+      return {
+        userId: DEMO_SHOWCASE_USER_ID,
+        totalInterviewsGiven: DEFAULT_SHOWCASE_SESSIONS.length,
+        completedInterviews: DEFAULT_SHOWCASE_SESSIONS.length,
+        avgScore: 88,
+        topScore: 94,
+        totalQuestionsAnswered: 4,
+        sessions: DEFAULT_SHOWCASE_SESSIONS,
+        lastUpdated: new Date().toISOString(),
+      };
+    }
     return {
       userId,
+      totalInterviewsGiven: 0,
+      completedInterviews: 0,
+      avgScore: null,
+      topScore: null,
+      totalQuestionsAnswered: 0,
+      sessions: [],
+      lastUpdated: new Date().toISOString(),
+    };
+  }
+
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw) as DashboardStorageData;
+      if (parsed && Array.isArray(parsed.sessions)) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to parse stored dashboard data:", err);
+  }
+
+  // If it is the demo persona, seed with rich showcase data
+  if (isDemoUser) {
+    const demoData: DashboardStorageData = {
+      userId: DEMO_SHOWCASE_USER_ID,
       totalInterviewsGiven: DEFAULT_SHOWCASE_SESSIONS.length,
       completedInterviews: DEFAULT_SHOWCASE_SESSIONS.length,
       avgScore: 88,
@@ -224,53 +271,46 @@ export function getStoredDashboardData(userId?: string): DashboardStorageData {
       sessions: DEFAULT_SHOWCASE_SESSIONS,
       lastUpdated: new Date().toISOString(),
     };
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(demoData));
+    } catch {}
+    return demoData;
   }
 
-  try {
-    const raw = localStorage.getItem(DASHBOARD_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as DashboardStorageData;
-      if (parsed && Array.isArray(parsed.sessions) && parsed.sessions.length > 0) {
-        return parsed;
-      }
-    }
-  } catch (err) {
-    console.warn("Failed to parse stored dashboard data:", err);
-  }
-
-  // Seed default showcase data
-  const initialData: DashboardStorageData = {
-    userId: userId || "00000000-0000-0000-0000-000000000000",
-    totalInterviewsGiven: DEFAULT_SHOWCASE_SESSIONS.length,
-    completedInterviews: DEFAULT_SHOWCASE_SESSIONS.length,
-    avgScore: 88,
-    topScore: 94,
-    totalQuestionsAnswered: 4,
-    sessions: DEFAULT_SHOWCASE_SESSIONS,
+  // Any newly created account gets a pristine FRESH START!
+  const freshData: DashboardStorageData = {
+    userId,
+    totalInterviewsGiven: 0,
+    completedInterviews: 0,
+    avgScore: null,
+    topScore: null,
+    totalQuestionsAnswered: 0,
+    sessions: [],
     lastUpdated: new Date().toISOString(),
   };
 
   try {
-    localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(initialData));
+    localStorage.setItem(storageKey, JSON.stringify(freshData));
   } catch {}
 
-  return initialData;
+  return freshData;
 }
 
 /**
- * Save updated dashboard data to localStorage
+ * Save updated dashboard data to localStorage for a specific user
  */
 export function saveStoredDashboardData(data: DashboardStorageData): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(data));
+    const storageKey = getKey(data.userId);
+    localStorage.setItem(storageKey, JSON.stringify(data));
   } catch (err) {
     console.error("Failed to save dashboard data to localStorage:", err);
   }
 }
 
 /**
- * Add or update a session in localStorage and update stats
+ * Add or update a session in localStorage and update stats for that user
  */
 export function recordSessionInStorage(session: EnrichedSession): DashboardStorageData {
   const current = getStoredDashboardData(session.user_id);
@@ -302,11 +342,12 @@ export function recordSessionInStorage(session: EnrichedSession): DashboardStora
 }
 
 /**
- * Reset localStorage dashboard data to showcase defaults
+ * Reset localStorage dashboard data to defaults for that user
  */
 export function resetStoredDashboardData(userId?: string): DashboardStorageData {
   if (typeof window !== "undefined") {
-    localStorage.removeItem(DASHBOARD_STORAGE_KEY);
+    const storageKey = getKey(userId);
+    localStorage.removeItem(storageKey);
   }
   return getStoredDashboardData(userId);
 }

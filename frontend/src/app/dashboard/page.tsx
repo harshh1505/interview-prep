@@ -74,12 +74,12 @@ function StatCard({
 export default function DashboardPage() {
   const router = useRouter();
 
-  // Initial state reads directly from localStorage (instant 0ms render)
+  // Initial state (clean initial state until user session resolves)
   const [sessions, setSessions] = useState<EnrichedSession[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(false);
-  const [userName, setUserName] = useState<string | null>("Harsh Singh");
-  const [userId, setUserId] = useState<string | null>("00000000-0000-0000-0000-000000000000");
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [isMock, setIsMock] = useState(true);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -112,32 +112,36 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Hydrate immediately from localStorage
+  // Hydrate immediately from localStorage for the active user
   useEffect(() => {
     // 1. Check client session
     const mockUser = getClientMockSession();
-    const effectiveUid = mockUser?.id || "00000000-0000-0000-0000-000000000000";
 
-    if (mockUser) {
-      setIsMock(true);
-      const name =
-        mockUser.user_metadata?.full_name ||
-        mockUser.full_name ||
-        mockUser.email?.split("@")[0] ||
-        "Candidate";
-      setUserName(name);
-      setUserId(effectiveUid);
+    if (!mockUser) {
+      router.push("/login");
+      return;
     }
 
-    // 2. Load stored data from localStorage immediately (no spinner!)
-    const stored = getStoredDashboardData(effectiveUid);
+    const name =
+      mockUser.user_metadata?.full_name ||
+      mockUser.full_name ||
+      mockUser.email?.split("@")[0] ||
+      "Candidate";
+    setUserName(name);
+    setUserId(mockUser.id);
+    setIsMock(Boolean(mockUser.is_mock));
+
+    // 2. Load stored data for this specific user from localStorage
+    const stored = getStoredDashboardData(mockUser.id);
     setSessions(stored.sessions);
     setStats(computeStatsFromSessions(stored.sessions));
     setLoading(false);
 
-    // 3. Trigger background sync
-    syncBackgroundData(effectiveUid);
-  }, [syncBackgroundData]);
+    // 3. Background sync if demo user
+    if (mockUser.id === "00000000-0000-0000-0000-000000000000") {
+      syncBackgroundData(mockUser.id);
+    }
+  }, [router, syncBackgroundData]);
 
   // Handler: Add a quick mock interview session directly to localStorage
   function handleAddMockInterview() {

@@ -131,9 +131,7 @@ export function registerMockAccount(data: {
     };
   }
 
-  const id = emailClean.includes("harsh")
-    ? "00000000-0000-0000-0000-000000000000"
-    : "user-" + Math.random().toString(36).substring(2, 10);
+  const id = "user-" + Math.random().toString(36).substring(2, 10);
 
   const newAccount: RegisteredAccount = {
     id,
