@@ -137,10 +137,8 @@ export default function DashboardPage() {
     setStats(computeStatsFromSessions(stored.sessions));
     setLoading(false);
 
-    // 3. Background sync if demo user
-    if (mockUser.id === "00000000-0000-0000-0000-000000000000") {
-      syncBackgroundData(mockUser.id);
-    }
+    // 3. Background sync to pull any actual interviews recorded in backend
+    syncBackgroundData(mockUser.id);
   }, [router, syncBackgroundData]);
 
   // Handler: Add a quick mock interview session directly to localStorage

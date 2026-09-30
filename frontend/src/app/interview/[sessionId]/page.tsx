@@ -305,12 +305,13 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
       setIndex(index + 1);
     } else {
       try {
-        const completedRes = await completeSession(params.sessionId);
-        if (completedRes && completedRes.session) {
-          const allAnswers = questions.flatMap((q) => q.answers || []);
+        await completeSession(params.sessionId);
+        const detail = await getSession(params.sessionId);
+        if (detail && detail.session) {
+          const allAnswers = detail.questions?.flatMap((q) => q.answers || []) || [];
           recordSessionInStorage({
-            ...completedRes.session,
-            questions,
+            ...detail.session,
+            questions: detail.questions,
             allAnswers,
           });
         }
