@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
   const response = NextResponse.redirect(new URL("/login", request.url));
+  response.cookies.delete("mock_user_session");
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

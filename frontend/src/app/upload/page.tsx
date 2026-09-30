@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { checkApiHealth, createSession, uploadResume, type ApiHealth, type ResumeUploadResult } from "@/lib/api";
 import { createSupabaseClient } from "@/lib/supabase";
+import { getClientMockSession } from "@/lib/mock-auth";
 
 const FALLBACK_USER_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -35,11 +36,32 @@ export default function UploadPage() {
   const [health, setHealth] = useState<ApiHealth | null>(null);
 
   useEffect(() => {
-    // Resolve authenticated user ID
-    const supabase = createSupabaseClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setUserId(user.id);
-    });
+    // 1. Resolve user ID instantly from mock session or fallback
+    const mock = getClientMockSession();
+    const effectiveUid = mock?.id || FALLBACK_USER_ID;
+    if (mock) setUserId(effectiveUid);
+
+    // 2. Restore cached resume from localStorage if available
+    try {
+      const cached = localStorage.getItem(`rehearsal_resume_${effectiveUid}`);
+      if (cached) {
+        setResumeResult(JSON.parse(cached));
+      }
+    } catch {}
+
+    // 3. Fallback to Supabase client if needed
+    if (!mock) {
+      const supabase = createSupabaseClient();
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) {
+          setUserId(user.id);
+          try {
+            const cached = localStorage.getItem(`rehearsal_resume_${user.id}`);
+            if (cached) setResumeResult(JSON.parse(cached));
+          } catch {}
+        }
+      });
+    }
 
     checkApiHealth()
       .then(setHealth)
@@ -64,6 +86,9 @@ export default function UploadPage() {
 
       const result = await uploadResume(userId, selectedFile);
       setResumeResult(result);
+      try {
+        localStorage.setItem(`rehearsal_resume_${userId}`, JSON.stringify(result));
+      } catch {}
       setIndexingProgress(null);
     } catch (err) {
       console.error(err);

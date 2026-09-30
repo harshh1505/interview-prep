@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { completeSession, getSession, submitAnswer, type Question, type Answer } from "@/lib/api";
+import { recordSessionInStorage } from "@/lib/dashboard-storage";
 
 export default function InterviewPage({ params }: { params: { sessionId: string } }) {
   const router = useRouter();
@@ -303,7 +304,19 @@ export default function InterviewPage({ params }: { params: { sessionId: string 
     if (index + 1 < questions.length) {
       setIndex(index + 1);
     } else {
-      await completeSession(params.sessionId);
+      try {
+        const completedRes = await completeSession(params.sessionId);
+        if (completedRes && completedRes.session) {
+          const allAnswers = questions.flatMap((q) => q.answers || []);
+          recordSessionInStorage({
+            ...completedRes.session,
+            questions,
+            allAnswers,
+          });
+        }
+      } catch (err) {
+        console.warn("Could not save completed interview to local storage:", err);
+      }
       router.push(`/dashboard`);
     }
   }

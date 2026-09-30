@@ -4,91 +4,16 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSupabaseClient } from "@/lib/supabase";
-import { listSessions, getSession, type Session, type Question, type Answer } from "@/lib/api";
-
-interface EnrichedSession extends Session {
-  questions?: Question[];
-  allAnswers?: Answer[];
-}
-
-interface DashboardStats {
-  totalSessions: number;
-  completedSessions: number;
-  totalQuestionsAnswered: number;
-  highScoreAnswers: number; // answers with score >= 75
-  avgScore: number | null;
-  topScore: number | null;
-  weaknessAreas: Record<string, number>; // weakness text -> count
-  strengthAreas: Record<string, number>; // strength text -> count
-  categoryBreakdown: Record<string, { total: number; avgScore: number }>;
-}
-
-function computeStats(sessions: EnrichedSession[]): DashboardStats {
-  const completed = sessions.filter(
-    (s) => s.status === "completed" && s.overall_score != null
-  );
-
-  let totalQuestionsAnswered = 0;
-  let highScoreAnswers = 0;
-  const weaknessMap: Record<string, number> = {};
-  const strengthMap: Record<string, number> = {};
-  const categoryMap: Record<string, { scores: number[] }> = {};
-
-  for (const session of sessions) {
-    const answers = session.allAnswers || [];
-    totalQuestionsAnswered += answers.length;
-
-    for (const answer of answers) {
-      if ((answer.score ?? 0) >= 75) highScoreAnswers++;
-
-      // Collect weaknesses
-      for (const w of answer.weaknesses || []) {
-        const key = w.trim().toLowerCase();
-        if (key) weaknessMap[key] = (weaknessMap[key] || 0) + 1;
-      }
-      // Collect strengths
-      for (const s of answer.strengths || []) {
-        const key = s.trim().toLowerCase();
-        if (key) strengthMap[key] = (strengthMap[key] || 0) + 1;
-      }
-
-      // Category breakdown
-      const cat = (session.questions?.find((q) => q.id === answer.question_id)?.category) || "general";
-      if (!categoryMap[cat]) categoryMap[cat] = { scores: [] };
-      if (answer.score != null) categoryMap[cat].scores.push(answer.score);
-    }
-  }
-
-  const categoryBreakdown: Record<string, { total: number; avgScore: number }> = {};
-  for (const [cat, { scores }] of Object.entries(categoryMap)) {
-    categoryBreakdown[cat] = {
-      total: scores.length,
-      avgScore: scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0,
-    };
-  }
-
-  const avgScore =
-    completed.length > 0
-      ? Math.round(completed.reduce((acc, s) => acc + (s.overall_score ?? 0), 0) / completed.length)
-      : null;
-
-  const topScore =
-    completed.length > 0
-      ? Math.round(Math.max(...completed.map((s) => s.overall_score ?? 0)))
-      : null;
-
-  return {
-    totalSessions: sessions.length,
-    completedSessions: completed.length,
-    totalQuestionsAnswered,
-    highScoreAnswers,
-    avgScore,
-    topScore,
-    weaknessAreas: weaknessMap,
-    strengthAreas: strengthMap,
-    categoryBreakdown,
-  };
-}
+import { getClientMockSession } from "@/lib/mock-auth";
+import { listSessions, getSession } from "@/lib/api";
+import {
+  type EnrichedSession,
+  type DashboardStats,
+  getStoredDashboardData,
+  recordSessionInStorage,
+  resetStoredDashboardData,
+  computeStatsFromSessions,
+} from "@/lib/dashboard-storage";
 
 function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
   const radius = (size - 8) / 2;
@@ -148,58 +73,129 @@ function StatCard({
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [sessions, setSessions] = useState<EnrichedSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [signingOut, setSigningOut] = useState(false);
 
-  const loadData = useCallback(async (uid: string) => {
+  // Initial state reads directly from localStorage (instant 0ms render)
+  const [sessions, setSessions] = useState<EnrichedSession[]>([]);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [userName, setUserName] = useState<string | null>("Harsh Singh");
+  const [userId, setUserId] = useState<string | null>("00000000-0000-0000-0000-000000000000");
+  const [signingOut, setSigningOut] = useState(false);
+  const [isMock, setIsMock] = useState(true);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  // Sync with remote API in the background without blocking the UI
+  const syncBackgroundData = useCallback(async (uid: string) => {
     try {
       const { sessions: rawSessions } = await listSessions(uid);
-
-      // Enrich completed sessions with answers data for stats
-      const enriched: EnrichedSession[] = await Promise.all(
-        rawSessions.map(async (s) => {
+      if (rawSessions && rawSessions.length > 0) {
+        for (const s of rawSessions) {
           if (s.status === "completed") {
             try {
               const detail = await getSession(s.id);
-              const allAnswers = detail.questions.flatMap((q) => q.answers || []);
-              return { ...s, questions: detail.questions, allAnswers };
+              const allAnswers = detail.questions?.flatMap((q) => q.answers || []) || [];
+              recordSessionInStorage({ ...s, questions: detail.questions, allAnswers });
             } catch {
-              return s;
+              recordSessionInStorage(s);
             }
+          } else {
+            recordSessionInStorage(s);
           }
-          return s;
-        })
-      );
-
-      setSessions(enriched);
-      setStats(computeStats(enriched));
-    } catch (err) {
-      console.error("Dashboard load error:", err);
-    } finally {
-      setLoading(false);
+        }
+        // Refresh local storage view
+        const stored = getStoredDashboardData(uid);
+        setSessions(stored.sessions);
+        setStats(computeStatsFromSessions(stored.sessions));
+      }
+    } catch (e) {
+      console.warn("Background API sync:", e);
     }
   }, []);
 
+  // Hydrate immediately from localStorage
   useEffect(() => {
-    const supabase = createSupabaseClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) {
-        router.push("/login");
-        return;
-      }
+    // 1. Check client session
+    const mockUser = getClientMockSession();
+    const effectiveUid = mockUser?.id || "00000000-0000-0000-0000-000000000000";
+
+    if (mockUser) {
+      setIsMock(true);
       const name =
-        user.user_metadata?.full_name ||
-        user.email?.split("@")[0] ||
+        mockUser.user_metadata?.full_name ||
+        mockUser.full_name ||
+        mockUser.email?.split("@")[0] ||
         "Candidate";
       setUserName(name);
-      setUserId(user.id);
-      loadData(user.id);
-    });
-  }, [router, loadData]);
+      setUserId(effectiveUid);
+    }
+
+    // 2. Load stored data from localStorage immediately (no spinner!)
+    const stored = getStoredDashboardData(effectiveUid);
+    setSessions(stored.sessions);
+    setStats(computeStatsFromSessions(stored.sessions));
+    setLoading(false);
+
+    // 3. Trigger background sync
+    syncBackgroundData(effectiveUid);
+  }, [syncBackgroundData]);
+
+  // Handler: Add a quick mock interview session directly to localStorage
+  function handleAddMockInterview() {
+    const roles = [
+      { role: "Senior Distributed Systems Engineer", domain: "Raft, Kafka & Kubernetes", score: 92 },
+      { role: "Frontend Performance Specialist", domain: "Core Web Vitals, Next.js & SSR", score: 86 },
+      { role: "Staff AI Engineer", domain: "Agentic Workflows & Multi-LLM RAG", score: 95 },
+      { role: "Platform Security Engineer", domain: "OAuth 2.1, Zero-Trust & IAM", score: 89 },
+    ];
+    const picked = roles[Math.floor(Math.random() * roles.length)];
+
+    const newSession: EnrichedSession = {
+      id: "session-local-" + Math.random().toString(36).substring(2, 9),
+      user_id: userId || "00000000-0000-0000-0000-000000000000",
+      role: picked.role,
+      domain: picked.domain,
+      status: "completed",
+      overall_score: picked.score,
+      created_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      questions: [
+        {
+          id: "q-dyn-" + Math.random().toString(36).substring(2, 6),
+          prompt: `How would you evaluate and optimize performance for ${picked.domain}?`,
+          category: "technical",
+          order_index: 0,
+        },
+      ],
+      allAnswers: [
+        {
+          id: "a-dyn-" + Math.random().toString(36).substring(2, 6),
+          question_id: "q-dyn-1",
+          session_id: "temp",
+          answer_text: "Benchmarked latency percentiles (p95, p99), identified bottleneck layers, and implemented horizontal scaling with automated backpressure.",
+          score: picked.score,
+          strengths: ["Clear metrics-driven approach", "System architecture depth"],
+          weaknesses: [],
+        },
+      ],
+    };
+
+    const updatedData = recordSessionInStorage(newSession);
+    setSessions(updatedData.sessions);
+    setStats(computeStatsFromSessions(updatedData.sessions));
+
+    setToastMsg(`+1 Interview Added: "${picked.role}" (Score: ${picked.score}%) saved to localStorage!`);
+    setTimeout(() => setToastMsg(null), 3500);
+  }
+
+  // Handler: Reset localStorage to default showcase data
+  function handleResetDemoData() {
+    const resetData = resetStoredDashboardData(userId || undefined);
+    setSessions(resetData.sessions);
+    setStats(computeStatsFromSessions(resetData.sessions));
+
+    setToastMsg("LocalStorage reset to 3 pristine showcase interviews.");
+    setTimeout(() => setToastMsg(null), 3500);
+  }
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -234,9 +230,15 @@ export default function DashboardPage() {
           >
             Rehearsal
           </Link>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
+            {isMock && (
+              <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-sans text-amber-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                Showcase Mode
+              </span>
+            )}
             {userName && (
-              <span className="font-sans text-xs text-chalk-200/50 hidden sm:block">
+              <span className="font-sans text-xs text-chalk-200/70 hidden sm:block">
                 👤 {userName}
               </span>
             )}
@@ -259,17 +261,62 @@ export default function DashboardPage() {
       </header>
 
       <div className="mx-auto max-w-5xl px-6 py-10">
-        {/* Greeting */}
-        <div className="border-b border-chalk-200/10 pb-6 mb-8">
-          <p className="font-sans text-xs uppercase tracking-widest text-amber-400/80 mb-1">
-            Performance Dashboard
-          </p>
-          <h1 className="font-serif text-3xl text-chalk-50">
-            {userName ? `Good to see you, ${userName.split(" ")[0]}` : "Your Dashboard"}
-          </h1>
-          <p className="mt-1.5 font-sans text-sm text-chalk-200/60">
-            Track your interviews, scores, and areas to improve over time.
-          </p>
+        {/* Toast Alert */}
+        {toastMsg && (
+          <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs font-sans text-amber-300 flex items-center justify-between animate-fade-in shadow-lg">
+            <div className="flex items-center gap-2">
+              <span>💾</span>
+              <span>{toastMsg}</span>
+            </div>
+            <button
+              onClick={() => setToastMsg(null)}
+              className="text-chalk-200/50 hover:text-chalk-100 font-bold ml-4"
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Greeting + LocalStorage Action Bar */}
+        <div className="border-b border-chalk-200/10 pb-6 mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <p className="font-sans text-xs uppercase tracking-widest text-amber-400/80">
+                Performance Dashboard
+              </p>
+              <span className="inline-flex items-center gap-1 rounded bg-ink-800 px-2 py-0.5 text-[10px] font-sans text-chalk-200/60 border border-chalk-200/10">
+                💾 LocalStorage Sync Active
+              </span>
+            </div>
+            <h1 className="font-serif text-3xl text-chalk-50">
+              {userName ? `Good to see you, ${userName.split(" ")[0]}` : "Your Dashboard"}
+            </h1>
+            <p className="mt-1.5 font-sans text-sm text-chalk-200/60">
+              Track your interviews, scores, and areas to improve over time.
+            </p>
+          </div>
+
+          {/* Interactive Showcase Buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              id="add-mock-interview-btn"
+              onClick={handleAddMockInterview}
+              className="rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-1.5 font-sans text-xs font-medium text-amber-300 transition flex items-center gap-1.5"
+            >
+              <span>⚡</span>
+              <span>+ Add Mock Interview</span>
+            </button>
+            <button
+              type="button"
+              id="reset-demo-data-btn"
+              onClick={handleResetDemoData}
+              className="rounded-lg border border-chalk-200/15 bg-ink-800/60 hover:bg-ink-800 px-3 py-1.5 font-sans text-xs font-medium text-chalk-200/70 hover:text-chalk-100 transition"
+              title="Reset localStorage data to 3 demo sessions"
+            >
+              ↺ Reset Demo
+            </button>
+          </div>
         </div>
 
         {loading ? (
@@ -279,23 +326,23 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {/* Stats Grid */}
+            {/* Stats Grid: Number of Interviews Given and All */}
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-8">
               <StatCard
-                label="Total Sessions"
+                label="Interviews Given"
                 value={stats?.totalSessions ?? 0}
-                sub={`${stats?.completedSessions ?? 0} completed`}
+                sub={`${stats?.completedSessions ?? 0} completed · in localStorage`}
                 accent="chalk"
               />
               <StatCard
                 label="Avg Score"
-                value={stats?.avgScore != null ? `${stats.avgScore}` : "—"}
-                sub="Across completed sessions"
+                value={stats?.avgScore != null ? `${stats.avgScore}%` : "—"}
+                sub="Across completed interviews"
                 accent="amber"
               />
               <StatCard
                 label="Peak Score"
-                value={stats?.topScore != null ? `${stats.topScore}` : "—"}
+                value={stats?.topScore != null ? `${stats.topScore}%` : "—"}
                 sub="Personal best"
                 accent="moss"
               />
@@ -371,8 +418,8 @@ export default function DashboardPage() {
                     .sort((a, b) => b[1].total - a[1].total)
                     .map(([cat, { total, avgScore }]) => (
                       <div key={cat} className="flex items-center gap-3">
-                        <span className="font-sans text-xs text-chalk-200/70 capitalize w-28 shrink-0">
-                          {cat.replace("-", " ")}
+                        <span className="font-sans text-xs text-chalk-200/70 capitalize w-36 shrink-0 truncate">
+                          {cat.replace(/[-_]/g, " ")}
                         </span>
                         <div className="flex-1 h-2 rounded-full bg-ink-800 overflow-hidden">
                           <div
@@ -400,7 +447,7 @@ export default function DashboardPage() {
                                   : "#B5563C",
                             }}
                           >
-                            {avgScore}
+                            {avgScore}%
                           </span>
                           <span className="font-sans text-[10px] text-chalk-200/30">
                             ({total}q)
@@ -414,9 +461,14 @@ export default function DashboardPage() {
 
             {/* Interview History */}
             <div>
-              <h2 className="font-serif text-xl text-chalk-50 mb-5">
-                Interview History
-              </h2>
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="font-serif text-xl text-chalk-50">
+                  Interview History ({sessions.length})
+                </h2>
+                <span className="text-xs font-sans text-chalk-200/40">
+                  Persisted in Browser LocalStorage
+                </span>
+              </div>
 
               {sessions.length === 0 && (
                 <div className="rounded-xl border border-dashed border-chalk-200/15 bg-ink-900/50 p-10 text-center">
@@ -424,14 +476,22 @@ export default function DashboardPage() {
                     No interviews yet
                   </p>
                   <p className="mt-1 font-sans text-sm text-chalk-200/60">
-                    Upload your resume and start your first mock interview.
+                    Upload your resume or click &quot;+ Add Mock Interview&quot; above to simulate an interview.
                   </p>
-                  <Link
-                    href="/upload"
-                    className="mt-6 inline-block rounded bg-amber-500 px-5 py-2.5 font-sans text-xs font-semibold text-ink-950 hover:bg-amber-400 transition"
-                  >
-                    Start First Interview →
-                  </Link>
+                  <div className="mt-6 flex items-center justify-center gap-3">
+                    <button
+                      onClick={handleAddMockInterview}
+                      className="rounded bg-amber-500 px-4 py-2 font-sans text-xs font-semibold text-ink-950 hover:bg-amber-400 transition"
+                    >
+                      ⚡ Add Mock Interview
+                    </button>
+                    <Link
+                      href="/upload"
+                      className="rounded border border-chalk-200/20 bg-ink-800 px-4 py-2 font-sans text-xs font-medium text-chalk-100 hover:bg-ink-700 transition"
+                    >
+                      Upload Resume →
+                    </Link>
+                  </div>
                 </div>
               )}
 

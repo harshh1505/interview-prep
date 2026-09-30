@@ -120,6 +120,41 @@ function saveLocalStore(data: LocalStoreSchema): void {
 }
 
 export const storage = {
+  async upsertProfile(
+    userId: string,
+    data: { full_name?: string; target_role?: string; resume_text?: string }
+  ): Promise<ProfileRecord> {
+    if (supabaseClient) {
+      const { data: record, error } = await supabaseClient
+        .from("profiles")
+        .upsert({ id: userId, ...data }, { onConflict: "id" })
+        .select()
+        .single();
+      if (!error && record) return record as ProfileRecord;
+    }
+    const local = loadLocalStore();
+    const existingIndex = local.profiles.findIndex((p) => p.id === userId);
+    if (existingIndex >= 0) {
+      local.profiles[existingIndex] = {
+        ...local.profiles[existingIndex],
+        ...data,
+      };
+      saveLocalStore(local);
+      return local.profiles[existingIndex];
+    } else {
+      const newProf: ProfileRecord = {
+        id: userId,
+        full_name: data.full_name || "Candidate",
+        target_role: data.target_role || "Software Engineer",
+        resume_text: data.resume_text,
+        created_at: new Date().toISOString(),
+      };
+      local.profiles.push(newProf);
+      saveLocalStore(local);
+      return newProf;
+    }
+  },
+
   async getProfile(userId: string): Promise<ProfileRecord | null> {
     if (supabaseClient) {
       const { data, error } = await supabaseClient
