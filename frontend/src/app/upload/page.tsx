@@ -6,6 +6,7 @@ import Link from "next/link";
 import { checkApiHealth, createSession, uploadResume, type ApiHealth, type ResumeUploadResult } from "@/lib/api";
 import { createSupabaseClient } from "@/lib/supabase";
 import { getClientMockSession } from "@/lib/mock-auth";
+import { Upload, FileText, CheckCircle2, ArrowRight, Sparkles, ArrowLeft } from "lucide-react";
 
 const FALLBACK_USER_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -36,37 +37,22 @@ export default function UploadPage() {
   const [health, setHealth] = useState<ApiHealth | null>(null);
 
   useEffect(() => {
-    // 1. Resolve user ID instantly from mock session or fallback
-    const mock = getClientMockSession();
-    const effectiveUid = mock?.id || FALLBACK_USER_ID;
-    if (mock) setUserId(effectiveUid);
-
-    // 2. Restore cached resume from localStorage if available
-    try {
-      const cached = localStorage.getItem(`rehearsal_resume_${effectiveUid}`);
-      if (cached) {
-        setResumeResult(JSON.parse(cached));
-      }
-    } catch {}
-
-    // 3. Fallback to Supabase client if needed
-    if (!mock) {
-      const supabase = createSupabaseClient();
-      supabase.auth.getUser().then(({ data: { user } }) => {
-        if (user) {
-          setUserId(user.id);
-          try {
-            const cached = localStorage.getItem(`rehearsal_resume_${user.id}`);
-            if (cached) setResumeResult(JSON.parse(cached));
-          } catch {}
+    fetch("/api/user/me")
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.user) {
+          setUserId(json.user.id);
+          if (json.user.targetRole && !role) {
+            setRole(json.user.targetRole);
+          }
         }
-      });
-    }
+      })
+      .catch((err) => console.warn("Failed to load user profile:", err));
 
     checkApiHealth()
       .then(setHealth)
       .catch((err) => console.warn("API health check:", err));
-  }, []);
+  }, [role]);
 
   async function handleFileSelect(selectedFile: File | null) {
     if (!selectedFile) return;
@@ -81,18 +67,15 @@ export default function UploadPage() {
 
     try {
       setTimeout(() => setIndexingProgress("Semantic chunking into section-aware paragraphs..."), 600);
-      setTimeout(() => setIndexingProgress("Generating 768-dim embeddings via Gemini text-embedding-004..."), 1200);
-      setTimeout(() => setIndexingProgress("Upserting vectors into Pinecone database..."), 2000);
+      setTimeout(() => setIndexingProgress("Generating embeddings via Gemini..."), 1200);
+      setTimeout(() => setIndexingProgress("Upserting vectors into database..."), 2000);
 
       const result = await uploadResume(userId, selectedFile);
       setResumeResult(result);
-      try {
-        localStorage.setItem(`rehearsal_resume_${userId}`, JSON.stringify(result));
-      } catch {}
       setIndexingProgress(null);
     } catch (err) {
       console.error(err);
-      setError(err instanceof Error ? err.message : "Failed to parse and chunk resume onto Pinecone.");
+      setError(err instanceof Error ? err.message : "Failed to parse and chunk resume.");
       setIndexingProgress(null);
     } finally {
       setUploadingResume(false);
@@ -125,7 +108,7 @@ export default function UploadPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Could not generate interview questions. Verify backend is running and GEMINI_API_KEY is configured in backend/.env"
+          : "Could not generate interview questions. Verify backend is running and GEMINI_API_KEY is set in backend/.env"
       );
     } finally {
       setStartingSession(false);
@@ -133,226 +116,242 @@ export default function UploadPage() {
   }
 
   return (
-    <main className="min-h-screen bg-ink-950 text-chalk-100">
-      {/* Top Navigation */}
-      <header className="border-b border-chalk-200/10 bg-ink-950/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <Link href="/" className="font-serif text-xl tracking-tight text-chalk-50 hover:text-amber-500 transition">
-            Rehearsal <span className="text-xs font-sans font-normal tracking-wide text-amber-500 uppercase px-2 py-0.5 border border-amber-500/30 rounded-full ml-2">Gemini + Pinecone</span>
-          </Link>
-          <div className="flex items-center gap-6 font-sans text-xs">
-            <Link href="/dashboard" className="text-chalk-200/70 hover:text-chalk-50 transition">
-              Past Sessions
+    <div className="min-h-screen bg-[#2A3256] font-sans text-slate-900 flex flex-col">
+      {/* Top Header */}
+      <header className="h-14 bg-white border-b border-slate-200/90 px-6 flex items-center justify-between shrink-0 sticky top-0 z-30 shadow-xs">
+        <div className="mx-auto flex max-w-5xl items-center justify-between w-full">
+          <div className="flex items-center gap-3">
+            <Link href="/dashboard" className="text-slate-400 hover:text-slate-600 transition">
+              <ArrowLeft className="w-5 h-5" />
             </Link>
-            {health && (
-              <span className="flex items-center gap-2 text-chalk-200/50">
-                <span
-                  className={`inline-block h-2 w-2 rounded-full ${
-                    health.services.gemini === "configured" ? "bg-moss-500" : "bg-amber-500 animate-pulse"
-                  }`}
-                />
-                Gemini: {health.services.gemini === "configured" ? "Active" : "Key Needed in .env"}
-              </span>
-            )}
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-extrabold text-xs shadow-xs">
+                <Sparkles className="w-3.5 h-3.5 text-white" />
+              </div>
+              <span className="font-extrabold text-lg tracking-tight text-slate-900">PrepPilot</span>
+            </div>
           </div>
+          <Link
+            href="/dashboard"
+            className="text-xs font-bold text-slate-600 hover:text-slate-900 transition border border-slate-200 px-3 py-1 rounded-xl bg-white shadow-xs"
+          >
+            Dashboard
+          </Link>
         </div>
       </header>
 
-      <div className="mx-auto max-w-2xl px-6 py-12">
-        <div className="border-b border-chalk-200/10 pb-6">
-          <p className="font-sans text-xs font-semibold uppercase tracking-widest text-amber-500">
-            Phase 1 · Session Calibration
-          </p>
-          <h1 className="mt-2 font-serif text-3xl text-chalk-50">Set up your mock interview</h1>
-          <p className="mt-2 font-sans text-sm text-chalk-200/70 leading-relaxed">
-            Upload your resume to chunk and index it in Pinecone. Google Gemini will probe your specific projects,
-            technologies, and architectural decisions.
+      {/* Main Viewport Container */}
+      <div className="flex-1 min-h-[calc(100vh-56px)] max-w-5xl w-full mx-auto p-4 sm:p-6 flex flex-col gap-5 bg-[#FEF9EF] rounded-t-[32px] border-x-4 border-t-4 border-[#EADCB9] shadow-2xl my-auto">
+        {/* Title Header */}
+        <div className="shrink-0 flex items-center justify-between border-b border-[#EADCB9] pb-3">
+          <div>
+            <span className="text-[10px] font-black uppercase tracking-widest text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+              PHASE 1 · CALIBRATION
+            </span>
+            <h1 className="text-xl font-black text-[#1E2544] tracking-tight mt-1">
+              Set up your mock interview
+            </h1>
+          </div>
+          <p className="text-xs font-semibold text-slate-500 max-w-sm text-right hidden sm:block">
+            Gemini 2.5 Flash will ground questions in your experience.
           </p>
         </div>
 
-        {health && health.services.gemini === "missing_key" && (
-          <div className="mt-6 rounded border border-amber-500/30 bg-amber-500/10 p-4 font-sans text-xs text-amber-200">
-            <p className="font-semibold text-amber-400">Notice: Gemini API Key Not Yet Configured</p>
-            <p className="mt-1 text-chalk-200/80">
-              Add your <code className="bg-ink-900 px-1.5 py-0.5 text-amber-300">GEMINI_API_KEY</code> to{" "}
-              <code className="bg-ink-900 px-1.5 py-0.5 text-amber-300">backend/.env</code> to generate real Gemini questions
-              and evaluations.
-            </p>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="mt-8 space-y-8">
-          {/* Target Role & Presets */}
-          <div>
-            <label className="block font-sans text-sm font-medium text-chalk-100" htmlFor="role">
-              Target Role <span className="text-amber-500">*</span>
-            </label>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {ROLE_PRESETS.map((preset) => (
-                <button
-                  type="button"
-                  key={preset}
-                  onClick={() => setRole(preset)}
-                  className={`rounded-full px-3 py-1 font-sans text-xs transition ${
-                    role === preset
-                      ? "bg-amber-500 text-ink-950 font-semibold"
-                      : "border border-chalk-200/20 bg-ink-900 text-chalk-200/70 hover:border-amber-500/50 hover:text-chalk-50"
-                  }`}
-                >
-                  {preset}
-                </button>
-              ))}
-            </div>
-            <input
-              id="role"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              placeholder="e.g. Senior Distributed Systems Engineer"
-              className="mt-3 w-full border border-chalk-200/20 bg-ink-900 px-4 py-3 font-sans text-sm text-chalk-50 placeholder:text-chalk-200/30 focus:border-amber-500 focus:outline-none"
-            />
-          </div>
-
-          {/* Domain / Specialization */}
-          <div>
-            <label className="block font-sans text-sm font-medium text-chalk-100" htmlFor="domain">
-              Domain Focus <span className="text-chalk-200/40 text-xs font-normal">(Optional)</span>
-            </label>
-            <input
-              id="domain"
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              placeholder="e.g. High-throughput Kafka, Microservices, RAG Pipelines"
-              className="mt-2 w-full border border-chalk-200/20 bg-ink-900 px-4 py-3 font-sans text-sm text-chalk-50 placeholder:text-chalk-200/30 focus:border-amber-500 focus:outline-none"
-            />
-          </div>
-
-          {/* Experience Level & Question Count */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-sans text-sm font-medium text-chalk-100">Seniority Level</label>
-              <div className="mt-2 grid grid-cols-3 gap-1 rounded border border-chalk-200/20 bg-ink-900 p-1">
-                {(["entry", "mid", "senior"] as const).map((lvl) => (
+        {/* 2-Column Form Layout */}
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Left Column: Target Role & Resume Upload */}
+          <div className="flex flex-col gap-4">
+            {/* Target Role & Presets */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs space-y-2.5">
+              <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700">
+                Target Role <span className="text-red-500">*</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {ROLE_PRESETS.map((preset) => (
                   <button
                     type="button"
-                    key={lvl}
-                    onClick={() => setDifficulty(lvl)}
-                    className={`py-2 text-center font-sans text-xs capitalize transition rounded ${
-                      difficulty === lvl
-                        ? "bg-amber-500 font-semibold text-ink-950"
-                        : "text-chalk-200/70 hover:text-chalk-50"
+                    key={preset}
+                    onClick={() => setRole(preset)}
+                    className={`rounded-xl px-2.5 py-1 text-xs font-bold transition ${
+                      role === preset
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     }`}
                   >
-                    {lvl}
+                    {preset}
                   </button>
                 ))}
               </div>
-            </div>
-
-            <div>
-              <label className="block font-sans text-sm font-medium text-chalk-100">Question Volume</label>
-              <div className="mt-2 grid grid-cols-3 gap-1 rounded border border-chalk-200/20 bg-ink-900 p-1">
-                {[3, 5, 8].map((count) => (
-                  <button
-                    type="button"
-                    key={count}
-                    onClick={() => setQuestionCount(count)}
-                    className={`py-2 text-center font-sans text-xs transition rounded ${
-                      questionCount === count
-                        ? "bg-amber-500 font-semibold text-ink-950"
-                        : "text-chalk-200/70 hover:text-chalk-50"
-                    }`}
-                  >
-                    {count} Questions
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Resume Upload & Pinecone Chunking Box */}
-          <div className="border border-chalk-200/20 bg-ink-900 p-6 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="block font-sans text-sm font-semibold text-chalk-50" htmlFor="resume">
-                  Candidate Resume
-                </label>
-                <p className="mt-1 font-sans text-xs text-chalk-200/60">
-                  Upload PDF to chunk into sections and index vectors in Pinecone.
-                </p>
-              </div>
-              <span className="rounded bg-amber-500/10 px-2 py-1 font-sans text-[11px] font-medium text-amber-400 border border-amber-500/20">
-                Pinecone Vector RAG
-              </span>
-            </div>
-
-            <div className="mt-4">
               <input
-                id="resume"
-                type="file"
-                accept="application/pdf"
-                disabled={uploadingResume}
-                onChange={(e) => handleFileSelect(e.target.files?.[0] ?? null)}
-                className="w-full font-sans text-sm text-chalk-200/70 file:mr-4 file:cursor-pointer file:rounded file:border-0 file:bg-amber-500 file:px-4 file:py-2.5 file:font-sans file:text-xs file:font-semibold file:text-ink-950 hover:file:bg-amber-400"
+                type="text"
+                id="role"
+                required
+                placeholder="Or type custom role title (e.g. Senior Architect)..."
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-900 font-semibold placeholder-slate-400 focus:border-blue-600 focus:outline-none transition"
               />
             </div>
 
-            {/* Indexing state feedback */}
-            {uploadingResume && (
-              <div className="mt-4 space-y-2 rounded border border-amber-500/30 bg-ink-950 p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
-                  <span className="font-sans text-xs font-medium text-amber-400">{indexingProgress}</span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink-800">
-                  <div className="h-full w-2/3 animate-pulse bg-amber-500" />
+            {/* Seniority Level & Question Volume */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Seniority Level */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-xs space-y-2">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700">
+                  Seniority Level
+                </label>
+                <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+                  {(["entry", "mid", "senior"] as const).map((lvl) => (
+                    <button
+                      type="button"
+                      key={lvl}
+                      onClick={() => setDifficulty(lvl)}
+                      className={`py-1.5 text-xs font-black capitalize rounded-lg transition ${
+                        difficulty === lvl
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                      }`}
+                    >
+                      {lvl === "entry" ? "Entry" : lvl === "mid" ? "Mid" : "Senior"}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
 
-            {/* Successful indexing details */}
-            {resumeResult && !uploadingResume && (
-              <div className="mt-4 rounded border border-moss-500/30 bg-moss-500/10 p-4 font-sans text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-moss-400">✓ Resume Chunked & Indexed</span>
-                  <span className="text-[11px] text-chalk-200/60 uppercase">
-                    Storage: {resumeResult.storage === "pinecone" ? "Pinecone Serverless" : "Local Vector Memory"}
-                  </span>
+              {/* Question Volume */}
+              <div className="bg-white rounded-2xl border border-slate-200/90 p-3.5 shadow-xs space-y-2">
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-700">
+                  Question Volume
+                </label>
+                <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+                  {[3, 5, 8].map((count) => (
+                    <button
+                      type="button"
+                      key={count}
+                      onClick={() => setQuestionCount(count)}
+                      className={`py-1.5 text-xs font-black rounded-lg transition ${
+                        questionCount === count
+                          ? "bg-blue-600 text-white shadow-xs"
+                          : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/60"
+                      }`}
+                    >
+                      {count} Questions
+                    </button>
+                  ))}
                 </div>
-                <p className="mt-1 text-chalk-200/80">
-                  Extracted {resumeResult.extractedChars.toLocaleString()} characters into{" "}
-                  <strong className="text-chalk-50">{resumeResult.chunkCount} semantic chunks</strong> across sections:{" "}
-                  <span className="text-amber-300">{resumeResult.sections.join(", ")}</span>.
-                </p>
-                {resumeResult.sampleChunks.length > 0 && (
-                  <div className="mt-2 border-t border-moss-500/20 pt-2 text-[11px] text-chalk-200/60">
-                    <span className="font-mono text-chalk-200/40">Sample chunk: </span>
-                    {resumeResult.sampleChunks[0].slice(0, 140)}...
-                  </div>
-                )}
               </div>
-            )}
+            </div>
+
+            {/* Resume Upload Dropzone */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs flex-1 flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700">
+                  Resume PDF Upload
+                </label>
+                <span className="text-[10px] font-extrabold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                  AI Grounding Enabled
+                </span>
+              </div>
+
+              <div className="relative my-2 flex-1 rounded-2xl border-2 border-dashed border-slate-200 hover:border-blue-500/50 p-4 text-center transition bg-slate-50/50 hover:bg-blue-50/20 flex flex-col items-center justify-center">
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                  <p className="text-xs font-extrabold text-slate-900">
+                    {file ? file.name : "Drop PDF resume here or click to browse"}
+                  </p>
+                  <p className="text-[10px] font-semibold text-slate-400">PDF documents up to 10MB</p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {error && (
-            <div className="rounded border border-clay-500/30 bg-clay-500/10 p-4 font-sans text-xs text-clay-400">
-              {error}
-            </div>
-          )}
+          {/* Right Column: AI Analysis Preview & Action */}
+          <div className="flex flex-col justify-between gap-3 min-h-0">
+            {/* Status / Preview Card */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs flex-1 flex flex-col justify-between overflow-y-auto">
+              <div>
+                <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 mb-2">
+                  Session Configuration
+                </h3>
 
-          {/* Submit Action */}
-          <button
-            type="submit"
-            disabled={startingSession || uploadingResume}
-            className="w-full rounded border border-amber-500 bg-amber-500 py-3.5 font-sans text-sm font-semibold text-ink-950 transition hover:bg-amber-400 hover:border-amber-400 disabled:opacity-50 shadow-lg shadow-amber-500/10"
-          >
-            {startingSession
-              ? "Querying Pinecone & Prompting Gemini…"
-              : resumeResult
-              ? "Begin Interview with Resume Grounding"
-              : "Begin Standard Mock Interview"}
-          </button>
+                <div className="space-y-2 text-xs font-semibold">
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+                    <span className="text-slate-500">Target Role:</span>
+                    <span className="font-extrabold text-blue-600">{role || "Not specified"}</span>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+                    <span className="text-slate-500">Seniority Level:</span>
+                    <span className="font-extrabold text-indigo-600 capitalize">{difficulty} Level</span>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+                    <span className="text-slate-500">Questions:</span>
+                    <span className="font-extrabold text-slate-900">{questionCount} Dynamic Scenarios</span>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+                    <span className="text-slate-500">Vector Store:</span>
+                    <span className="font-extrabold text-emerald-600">
+                      {resumeResult ? "Resume Indexed" : "Standard Domain Corpus"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {indexingProgress && (
+                <div className="flex items-center gap-2.5 p-3 rounded-xl bg-blue-50 text-blue-700 text-xs font-bold mt-2">
+                  <div className="w-3.5 h-3.5 rounded-full border-2 border-blue-600 border-t-transparent animate-spin" />
+                  <span>{indexingProgress}</span>
+                </div>
+              )}
+
+              {resumeResult && (
+                <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100 mt-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Resume indexed into vector store</span>
+                  </div>
+                  <span className="text-[10px] text-emerald-600 font-black">
+                    {resumeResult.extractedChars} chars
+                  </span>
+                </div>
+              )}
+
+              {error && (
+                <div className="rounded-xl bg-red-50 p-3 text-xs font-bold text-red-600 border border-red-100 mt-2">
+                  {error}
+                </div>
+              )}
+            </div>
+
+            {/* Primary Action Button */}
+            <button
+              type="submit"
+              disabled={startingSession || uploadingResume}
+              className="w-full rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-3.5 font-black text-sm shadow-md transition flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
+            >
+              {startingSession ? (
+                <span>Generating Gemini Interview Questions...</span>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Start Mock Interview</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </div>
         </form>
       </div>
-    </main>
+    </div>
   );
 }

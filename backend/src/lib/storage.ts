@@ -341,4 +341,147 @@ export const storage = {
     const local = loadLocalStore();
     return local.answers.filter((a) => a.session_id === sessionId);
   },
+
+  async saveResumeAnalysis(analysis: {
+    user_id: string;
+    raw_text?: string;
+    summary: string;
+    skills: string[];
+    technologies: string[];
+    projects: any[];
+    experience: any[];
+    interview_topics: string[];
+    potential_weaknesses: string[];
+  }): Promise<any> {
+    if (supabaseClient) {
+      const { data, error } = await supabaseClient
+        .from("resume_analysis")
+        .upsert(
+          {
+            user_id: analysis.user_id,
+            raw_text: analysis.raw_text,
+            summary: analysis.summary,
+            skills: analysis.skills,
+            technologies: analysis.technologies,
+            projects: analysis.projects,
+            experience: analysis.experience,
+            interview_topics: analysis.interview_topics,
+            potential_weaknesses: analysis.potential_weaknesses,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        )
+        .select()
+        .single();
+      if (!error && data) return data;
+      console.warn("[Storage] Supabase saveResumeAnalysis error:", error);
+    }
+    const local = loadLocalStore() as any;
+    if (!local.resume_analysis) local.resume_analysis = [];
+    const idx = local.resume_analysis.findIndex((r: any) => r.user_id === analysis.user_id);
+    const record = {
+      id: crypto.randomUUID(),
+      ...analysis,
+      updated_at: new Date().toISOString(),
+    };
+    if (idx >= 0) {
+      local.resume_analysis[idx] = record;
+    } else {
+      local.resume_analysis.push(record);
+    }
+    saveLocalStore(local);
+    return record;
+  },
+
+  async getResumeAnalysis(userId: string): Promise<any | null> {
+    if (supabaseClient) {
+      const { data, error } = await supabaseClient
+        .from("resume_analysis")
+        .select("*")
+        .eq("user_id", userId)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!error && data) return data;
+    }
+    const local = loadLocalStore() as any;
+    if (!local.resume_analysis) return null;
+    return local.resume_analysis.find((r: any) => r.user_id === userId) || null;
+  },
+
+  async saveInterviewReport(report: {
+    session_id: string;
+    user_id: string;
+    overall_score: number;
+    technical_accuracy: number;
+    communication_clarity: number;
+    depth_of_explanation: number;
+    resume_consistency: number;
+    key_strengths: string[];
+    areas_for_improvement: string[];
+    summary_feedback: string;
+    topic_breakdown: any;
+    question_evaluations: any;
+  }): Promise<any> {
+    if (supabaseClient) {
+      const { data, error } = await supabaseClient
+        .from("interview_reports")
+        .insert({
+          session_id: report.session_id,
+          user_id: report.user_id,
+          overall_score: report.overall_score,
+          technical_accuracy: report.technical_accuracy,
+          communication_clarity: report.communication_clarity,
+          depth_of_explanation: report.depth_of_explanation,
+          resume_consistency: report.resume_consistency,
+          key_strengths: report.key_strengths,
+          areas_for_improvement: report.areas_for_improvement,
+          summary_feedback: report.summary_feedback,
+          topic_breakdown: report.topic_breakdown,
+          question_evaluations: report.question_evaluations,
+        })
+        .select()
+        .single();
+      if (!error && data) return data;
+      console.warn("[Storage] Supabase saveInterviewReport error:", error);
+    }
+    const local = loadLocalStore() as any;
+    if (!local.interview_reports) local.interview_reports = [];
+    const record = {
+      id: crypto.randomUUID(),
+      ...report,
+      created_at: new Date().toISOString(),
+    };
+    local.interview_reports.push(record);
+    saveLocalStore(local);
+    return record;
+  },
+
+  async getInterviewReport(sessionId: string): Promise<any | null> {
+    if (supabaseClient) {
+      const { data, error } = await supabaseClient
+        .from("interview_reports")
+        .select("*")
+        .eq("session_id", sessionId)
+        .maybeSingle();
+      if (!error && data) return data;
+    }
+    const local = loadLocalStore() as any;
+    if (!local.interview_reports) return null;
+    return local.interview_reports.find((r: any) => r.session_id === sessionId) || null;
+  },
+
+  async listUserReports(userId: string): Promise<any[]> {
+    if (supabaseClient) {
+      const { data, error } = await supabaseClient
+        .from("interview_reports")
+        .select("*")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+      if (!error && data) return data;
+    }
+    const local = loadLocalStore() as any;
+    if (!local.interview_reports) return [];
+    return local.interview_reports.filter((r: any) => r.user_id === userId);
+  },
 };

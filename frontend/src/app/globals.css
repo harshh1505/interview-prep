@@ -1,15 +1,38 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Inter:wght@400;500;600&display=swap");
-
-body {
-  background-color: #0f1626;
-  color: #f4f0e4;
+html, body {
+  min-height: 100vh;
+  background-color: #FEF9EF;
+  color: #1E2544;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 ::selection {
-  background-color: #c88a2e;
-  color: #0f1626;
+  background-color: #FFB800;
+  color: #1E2544;
+}
+
+/* Custom Scrollbar Styling for Internal Controlled Scroll Containers & Document */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(234, 220, 185, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(42, 50, 86, 0.25);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(42, 50, 86, 0.4);
 }

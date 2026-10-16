@@ -3,11 +3,12 @@ import { z } from "zod";
 import { storage } from "@/lib/storage";
 import { generateQuestions } from "@/lib/gemini";
 import { queryResumeContext } from "@/lib/pinecone";
+import { getAuthenticatedUser } from "@/lib/auth-session";
 
 export const dynamic = "force-dynamic";
 
 const createSessionSchema = z.object({
-  userId: z.string().optional().default("00000000-0000-0000-0000-000000000000"),
+  userId: z.string().optional(),
   role: z.string().min(2),
   domain: z.string().optional(),
   difficulty: z.enum(["entry", "mid", "senior"]).optional().default("mid"),
@@ -23,7 +24,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: parseResult.error.flatten() }, { status: 400 });
     }
 
-    const { userId, role, domain, difficulty, useResume, questionCount } = parseResult.data;
+    const { userId: bodyUserId, role, domain, difficulty, useResume, questionCount } = parseResult.data;
+    const authenticated = await getAuthenticatedUser();
+
+    const userId =
+      bodyUserId && bodyUserId !== "00000000-0000-0000-0000-000000000000"
+        ? bodyUserId
+        : authenticated?.id || "00000000-0000-0000-0000-000000000000";
 
     let resumeChunks: string[] = [];
     let resumeText: string | undefined;
@@ -83,7 +90,8 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get("userId") || "00000000-0000-0000-0000-000000000000";
+    const authenticated = await getAuthenticatedUser();
+    const userId = searchParams.get("userId") || authenticated?.id || "00000000-0000-0000-0000-000000000000";
     const sessions = await storage.listSessions(userId);
     return NextResponse.json({ sessions });
   } catch (err) {

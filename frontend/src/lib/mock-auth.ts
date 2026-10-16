@@ -3,11 +3,15 @@ export interface MockUser {
   email: string;
   full_name: string;
   target_role?: string;
+  role?: string;
+  is_admin?: boolean;
   is_mock: boolean;
   avatar_url?: string;
   user_metadata?: {
     full_name?: string;
     target_role?: string;
+    role?: string;
+    is_admin?: boolean;
   };
 }
 
@@ -17,6 +21,8 @@ export interface RegisteredAccount {
   password: string;
   full_name: string;
   target_role?: string;
+  role?: string;
+  is_admin?: boolean;
   created_at: string;
 }
 
@@ -26,10 +32,14 @@ export const SHOWCASE_USERS: Record<string, MockUser> = {
     email: "harsh@rehearsal.ai",
     full_name: "Harsh Singh",
     target_role: "Full Stack & AI Engineer",
+    role: "user",
+    is_admin: false,
     is_mock: true,
     user_metadata: {
       full_name: "Harsh Singh",
       target_role: "Full Stack & AI Engineer",
+      role: "user",
+      is_admin: false,
     },
   },
   candidate: {
@@ -37,10 +47,29 @@ export const SHOWCASE_USERS: Record<string, MockUser> = {
     email: "alex.rivera@example.com",
     full_name: "Alex Rivera",
     target_role: "Frontend Engineer",
+    role: "user",
+    is_admin: false,
     is_mock: true,
     user_metadata: {
       full_name: "Alex Rivera",
       target_role: "Frontend Engineer",
+      role: "user",
+      is_admin: false,
+    },
+  },
+  admin: {
+    id: "admin-showcase-001",
+    email: "admin@rehearsal.ai",
+    full_name: "Admin User",
+    target_role: "System Administrator",
+    role: "admin",
+    is_admin: true,
+    is_mock: true,
+    user_metadata: {
+      full_name: "Admin User",
+      target_role: "System Administrator",
+      role: "admin",
+      is_admin: true,
     },
   },
 };
@@ -52,6 +81,8 @@ const DEFAULT_ACCOUNTS: RegisteredAccount[] = [
     password: "showcase2026",
     full_name: "Harsh Singh",
     target_role: "Full Stack & AI Engineer",
+    role: "user",
+    is_admin: false,
     created_at: new Date().toISOString(),
   },
   {
@@ -60,6 +91,8 @@ const DEFAULT_ACCOUNTS: RegisteredAccount[] = [
     password: "showcase2026",
     full_name: "Demo Candidate",
     target_role: "Full Stack Engineer",
+    role: "user",
+    is_admin: false,
     created_at: new Date().toISOString(),
   },
   {
@@ -68,6 +101,18 @@ const DEFAULT_ACCOUNTS: RegisteredAccount[] = [
     password: "showcase2026",
     full_name: "Alex Rivera",
     target_role: "Frontend Engineer",
+    role: "user",
+    is_admin: false,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "admin-showcase-001",
+    email: "admin@rehearsal.ai",
+    password: "showcase2026",
+    full_name: "Admin User",
+    target_role: "System Administrator",
+    role: "admin",
+    is_admin: true,
     created_at: new Date().toISOString(),
   },
 ];
@@ -109,6 +154,8 @@ export function registerMockAccount(data: {
   password: string;
   full_name: string;
   target_role?: string;
+  role?: string;
+  is_admin?: boolean;
 }): { success: boolean; user?: MockUser; error?: string } {
   const emailClean = data.email.trim().toLowerCase();
   const passwordClean = data.password;
@@ -132,13 +179,17 @@ export function registerMockAccount(data: {
   }
 
   const id = "user-" + Math.random().toString(36).substring(2, 10);
+  const isAdmin = Boolean(data.is_admin || data.role === "admin" || emailClean.startsWith("admin@"));
+  const role = data.role || (isAdmin ? "admin" : "user");
 
   const newAccount: RegisteredAccount = {
     id,
     email: emailClean,
     password: passwordClean,
-    full_name: data.full_name.trim() || "Candidate",
-    target_role: data.target_role?.trim() || "Software Engineer",
+    full_name: data.full_name.trim() || (isAdmin ? "Admin User" : "Candidate"),
+    target_role: data.target_role?.trim() || (isAdmin ? "System Administrator" : "Software Engineer"),
+    role,
+    is_admin: isAdmin,
     created_at: new Date().toISOString(),
   };
 
@@ -156,10 +207,14 @@ export function registerMockAccount(data: {
     email: newAccount.email,
     full_name: newAccount.full_name,
     target_role: newAccount.target_role,
+    role: newAccount.role,
+    is_admin: newAccount.is_admin,
     is_mock: true,
     user_metadata: {
       full_name: newAccount.full_name,
       target_role: newAccount.target_role,
+      role: newAccount.role,
+      is_admin: newAccount.is_admin,
     },
   };
 
@@ -192,19 +247,83 @@ export function authenticateMockAccount(
     };
   }
 
+  const isAdmin = Boolean(found.is_admin || found.role === "admin" || emailClean.startsWith("admin@"));
+  const role = found.role || (isAdmin ? "admin" : "user");
+
   const user: MockUser = {
     id: found.id,
     email: found.email,
     full_name: found.full_name,
     target_role: found.target_role,
+    role,
+    is_admin: isAdmin,
     is_mock: true,
     user_metadata: {
       full_name: found.full_name,
       target_role: found.target_role,
+      role,
+      is_admin: isAdmin,
     },
   };
 
   return { success: true, user };
+}
+
+/**
+ * Safely decodes and parses mock session JSON from cookie or localStorage strings.
+ * Correctly decodes single or multi-level URL encoding (e.g. %7B%22... or %257B%22...)
+ * without throwing SyntaxError: Unexpected token '%'.
+ */
+export function safeParseMockUser(rawValue: string | null | undefined): MockUser | null {
+  if (!rawValue) return null;
+  let str = String(rawValue).trim();
+  if (!str) return null;
+
+  // Strip wrapping quotes if any
+  if (
+    (str.startsWith('"') && str.endsWith('"')) ||
+    (str.startsWith("'") && str.endsWith("'"))
+  ) {
+    str = str.slice(1, -1).trim();
+  }
+
+  // Iteratively decode URL encoding (up to 3 times) until it starts with '{' or no more '%'
+  for (let i = 0; i < 3; i++) {
+    if (str.startsWith("{")) {
+      break;
+    }
+    if (str.includes("%")) {
+      try {
+        const decoded = decodeURIComponent(str);
+        if (decoded === str) break;
+        str = decoded.trim();
+      } catch {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(str);
+    if (parsed && typeof parsed === "object" && typeof parsed.id === "string") {
+      return parsed as MockUser;
+    }
+  } catch {
+    // If direct parse failed, attempt one final decodeURIComponent
+    if (str.includes("%")) {
+      try {
+        const decoded = decodeURIComponent(str);
+        const parsed = JSON.parse(decoded);
+        if (parsed && typeof parsed === "object" && typeof parsed.id === "string") {
+          return parsed as MockUser;
+        }
+      } catch {}
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -214,23 +333,22 @@ export function getClientMockSession(): MockUser | null {
   if (typeof window === "undefined") return null;
 
   try {
-    // Check cookies first
+    // 1. Check cookies first
     const match = document.cookie
       .split("; ")
       .find((row) => row.startsWith(`${MOCK_AUTH_COOKIE}=`));
 
     if (match) {
-      const rawVal = match.split("=")[1];
-      if (rawVal) {
-        const decoded = decodeURIComponent(rawVal);
-        return JSON.parse(decoded) as MockUser;
-      }
+      const rawVal = match.substring(MOCK_AUTH_COOKIE.length + 1);
+      const user = safeParseMockUser(rawVal);
+      if (user) return user;
     }
 
-    // Fallback to localStorage
+    // 2. Fallback to localStorage
     const local = localStorage.getItem(MOCK_AUTH_COOKIE);
     if (local) {
-      return JSON.parse(local) as MockUser;
+      const user = safeParseMockUser(local);
+      if (user) return user;
     }
   } catch (e) {
     console.warn("Failed to parse client mock session:", e);

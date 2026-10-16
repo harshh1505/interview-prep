@@ -1,21 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
-import { MOCK_AUTH_COOKIE, MockUser } from "./mock-auth";
+import { MOCK_AUTH_COOKIE, MockUser, safeParseMockUser } from "./mock-auth";
 
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
 
   const mockCookie = cookieStore.get(MOCK_AUTH_COOKIE)?.value;
-  let mockUser: MockUser | null = null;
-  if (mockCookie) {
-    try {
-      mockUser = JSON.parse(decodeURIComponent(mockCookie));
-    } catch {
-      try {
-        mockUser = JSON.parse(mockCookie);
-      } catch {}
-    }
-  }
+  const mockUser: MockUser | null = safeParseMockUser(mockCookie);
 
   const client = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

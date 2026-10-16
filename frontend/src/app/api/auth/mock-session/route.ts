@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { MOCK_AUTH_COOKIE, MockUser } from "@/lib/mock-auth";
+import { MOCK_AUTH_COOKIE, MockUser, safeParseMockUser } from "@/lib/mock-auth";
 import { storage } from "@/lib/storage";
 
 export async function GET(request: NextRequest) {
   const cookie = request.cookies.get(MOCK_AUTH_COOKIE)?.value;
-  if (!cookie) {
-    return NextResponse.json({ user: null });
-  }
-
-  try {
-    const user = JSON.parse(decodeURIComponent(cookie)) as MockUser;
-    return NextResponse.json({ user });
-  } catch {
-    return NextResponse.json({ user: null });
-  }
+  const user = safeParseMockUser(cookie);
+  return NextResponse.json({ user });
 }
 
 export async function POST(request: NextRequest) {

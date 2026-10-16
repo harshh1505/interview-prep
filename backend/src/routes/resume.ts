@@ -3,6 +3,7 @@ import multer from "multer";
 import pdfParse from "pdf-parse";
 import { storage } from "../lib/storage.js";
 import { indexResumeChunks } from "../lib/pinecone.js";
+import { analyzeResume } from "../lib/gemini.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -15,7 +16,7 @@ export const resumeRouter = Router();
  * POST /api/resume/upload
  * multipart/form-data: file (PDF), userId
  * Extracts resume text, divides into semantic chunks, generates Gemini embeddings,
- * and upserts into Pinecone vector database.
+ * analyzes structured profile skills/projects, and saves into Supabase public.resume_analysis.
  */
 resumeRouter.post("/upload", upload.single("file"), async (req, res) => {
   try {
@@ -50,6 +51,20 @@ resumeRouter.post("/upload", upload.single("file"), async (req, res) => {
     // Save extracted text to profile storage
     await storage.saveResumeText(userId, resumeText);
 
+    // Deep Gemini analysis to populate public.resume_analysis
+    const analysis = await analyzeResume(resumeText);
+    const savedAnalysis = await storage.saveResumeAnalysis({
+      user_id: userId,
+      raw_text: resumeText,
+      summary: analysis.summary,
+      skills: analysis.skills,
+      technologies: analysis.technologies,
+      projects: analysis.projects,
+      experience: analysis.experience,
+      interview_topics: analysis.interview_topics,
+      potential_weaknesses: analysis.potential_weaknesses,
+    });
+
     res.json({
       ok: true,
       extractedChars: resumeText.length,
@@ -57,7 +72,8 @@ resumeRouter.post("/upload", upload.single("file"), async (req, res) => {
       sections: indexResult.sections,
       sampleChunks: indexResult.sampleChunks,
       storage: indexResult.storage,
-      message: `Resume successfully parsed into ${indexResult.chunkCount} semantic chunks and indexed via ${indexResult.storage === "pinecone" ? "Pinecone Serverless" : "local vector memory"}.`,
+      analysis: savedAnalysis,
+      message: `Resume successfully analyzed with Gemini, indexed into vector store, and stored in public.resume_analysis.`,
     });
   } catch (err) {
     console.error("Resume upload & indexing error:", err);
@@ -75,15 +91,36 @@ resumeRouter.get("/status", async (req, res) => {
   try {
     const userId = (req.query.userId as string) || "00000000-0000-0000-0000-000000000000";
     const profile = await storage.getProfile(userId);
+    const analysis = await storage.getResumeAnalysis(userId);
     const hasResume = Boolean(profile?.resume_text && profile.resume_text.length > 50);
 
     res.json({
       hasResume,
       charCount: profile?.resume_text?.length || 0,
       preview: profile?.resume_text ? profile.resume_text.slice(0, 300) + "..." : null,
+      analysis,
     });
   } catch (err) {
     console.error("Status check error:", err);
     res.status(500).json({ error: "Failed to fetch resume status" });
   }
 });
+
+/**
+ * GET /api/resume/analysis?userId=...
+ * Returns structured resume analysis from database
+ */
+resumeRouter.get("/analysis", async (req, res) => {
+  try {
+    const userId = (req.query.userId as string) || "00000000-0000-0000-0000-000000000000";
+    const analysis = await storage.getResumeAnalysis(userId);
+    if (!analysis) {
+      return res.status(404).json({ error: "No resume analysis found for user." });
+    }
+    res.json({ analysis });
+  } catch (err) {
+    console.error("Fetch analysis error:", err);
+    res.status(500).json({ error: "Failed to fetch resume analysis" });
+  }
+});
+

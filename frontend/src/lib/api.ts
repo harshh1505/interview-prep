@@ -56,9 +56,21 @@ export interface ApiHealth {
 }
 
 export async function checkApiHealth(): Promise<ApiHealth> {
-  const res = await fetch(`${API_BASE}/health`);
-  if (!res.ok) throw new Error("API health check failed");
-  return res.json();
+  const base = API_BASE || (typeof window === "undefined" ? "http://localhost:3000" : "");
+  const primaryUrl = `${base}/api/health`;
+  try {
+    const res = await fetch(primaryUrl);
+    if (res.ok) {
+      return res.json();
+    }
+  } catch {
+    // Primary endpoint failed, fallback to /health
+  }
+
+  const fallbackUrl = `${base}/health`;
+  const fallbackRes = await fetch(fallbackUrl);
+  if (!fallbackRes.ok) throw new Error("API health check failed");
+  return fallbackRes.json();
 }
 
 export async function createSession(params: {
@@ -132,8 +144,22 @@ export async function getResumeStatus(userId: string): Promise<{
   hasResume: boolean;
   charCount: number;
   preview: string | null;
+  analysis?: any;
 }> {
   const res = await fetch(`${API_BASE}/api/resume/status?userId=${userId}`);
   if (!res.ok) throw new Error("Failed to check resume status");
   return res.json();
 }
+
+export async function fetchResumeAnalysis(userId: string): Promise<{ analysis: any }> {
+  const res = await fetch(`${API_BASE}/api/resume/analysis?userId=${userId}`);
+  if (!res.ok) throw new Error("Failed to load resume analysis");
+  return res.json();
+}
+
+export async function fetchInterviewReport(sessionId: string): Promise<{ report: any }> {
+  const res = await fetch(`${API_BASE}/api/answers/${sessionId}/report`);
+  if (!res.ok) throw new Error("Failed to load interview report");
+  return res.json();
+}
+

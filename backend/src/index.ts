@@ -34,7 +34,7 @@ app.use(
 );
 app.use(express.json());
 
-app.get("/health", (_req, res) => {
+const handleHealth = (_req: express.Request, res: express.Response) => {
   const hasGemini = Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.trim() !== "");
   const hasPinecone = Boolean(process.env.PINECONE_API_KEY && process.env.PINECONE_API_KEY.trim() !== "");
   res.json({
@@ -45,7 +45,10 @@ app.get("/health", (_req, res) => {
     },
     version: "0.2.0-gemini-pinecone",
   });
-});
+};
+
+app.get("/health", handleHealth);
+app.get("/api/health", handleHealth);
 
 app.use("/api/resume", resumeRouter);
 app.use("/api/sessions", sessionsRouter);

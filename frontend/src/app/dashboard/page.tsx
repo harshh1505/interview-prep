@@ -4,581 +4,551 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createSupabaseClient } from "@/lib/supabase";
-import { getClientMockSession } from "@/lib/mock-auth";
-import { listSessions, getSession } from "@/lib/api";
 import {
-  type EnrichedSession,
-  type DashboardStats,
-  getStoredDashboardData,
-  recordSessionInStorage,
-  resetStoredDashboardData,
-  computeStatsFromSessions,
-} from "@/lib/dashboard-storage";
+  LayoutDashboard,
+  BookOpen,
+  GraduationCap,
+  FileCheck,
+  Award,
+  User,
+  LogOut,
+  Search,
+  ArrowRight,
+  Sparkles,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle2,
+  BarChart2,
+  Clock,
+} from "lucide-react";
 
-function ScoreRing({ score, size = 56 }: { score: number; size?: number }) {
-  const radius = (size - 8) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (score / 100) * circumference;
-  const color = score >= 80 ? "#5C7A5A" : score >= 60 ? "#C88A2E" : "#B5563C";
-
-  return (
-    <svg width={size} height={size} className="rotate-[-90deg]">
-      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="#1E2A45" strokeWidth={5} />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        stroke={color}
-        strokeWidth={5}
-        strokeDasharray={circumference}
-        strokeDashoffset={strokeDashoffset}
-        strokeLinecap="round"
-        style={{ transition: "stroke-dashoffset 0.6s ease" }}
-      />
-    </svg>
-  );
+interface AreaToImprove {
+  text: string;
+  count: number;
 }
 
-function StatCard({
-  label,
-  value,
-  sub,
-  accent = "amber",
-}: {
-  label: string;
-  value: string | number;
-  sub?: string;
-  accent?: "amber" | "moss" | "clay" | "chalk";
-}) {
-  const accentClass = {
-    amber: "text-amber-400",
-    moss: "text-moss-500",
-    clay: "text-clay-500",
-    chalk: "text-chalk-50",
-  }[accent];
-
-  return (
-    <div className="rounded-xl border border-chalk-200/10 bg-ink-900 p-5 flex flex-col gap-1 hover:border-chalk-200/20 transition group">
-      <span className="font-sans text-[11px] uppercase tracking-widest text-chalk-200/40 group-hover:text-chalk-200/60 transition">
-        {label}
-      </span>
-      <p className={`font-serif text-3xl ${accentClass}`}>{value}</p>
-      {sub && (
-        <span className="font-sans text-[11px] text-chalk-200/40 mt-0.5">{sub}</span>
-      )}
-    </div>
-  );
+interface TopStrength {
+  text: string;
+  count: number;
 }
 
-export default function DashboardPage() {
+interface CategoryScore {
+  name: string;
+  score: number;
+  questionCount: number;
+}
+
+interface InterviewHistoryItem {
+  id: string;
+  role: string;
+  domain: string;
+  status: string;
+  createdAt: string;
+  questionsAnswered: number;
+  highScoreQuestions: number;
+  overallScore: number | null;
+}
+
+interface DashboardData {
+  user: {
+    id: string;
+    fullName: string;
+    targetRole: string;
+    role: string;
+    createdAt: string;
+  };
+  stats: {
+    interviewsGiven: number;
+    avgScore: number;
+    peakScore: number;
+    questionsDone: number;
+    questionsHighScored: number;
+    certificates: number;
+    totalSessions: number;
+  };
+  areasToImprove: AreaToImprove[];
+  topStrengths: TopStrength[];
+  scoreByCategory: CategoryScore[];
+  interviewHistory: InterviewHistoryItem[];
+  inProgressSession: any | null;
+  availablePrograms: any[];
+}
+
+export default function UserDashboardPage() {
   const router = useRouter();
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Initial state (clean initial state until user session resolves)
-  const [sessions, setSessions] = useState<EnrichedSession[]>([]);
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [signingOut, setSigningOut] = useState(false);
-  const [isMock, setIsMock] = useState(true);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-
-  // Sync with remote API in the background without blocking the UI
-  const syncBackgroundData = useCallback(async (uid: string) => {
+  const fetchDashboard = useCallback(async () => {
+    setLoading(true);
     try {
-      const { sessions: rawSessions } = await listSessions(uid);
-      if (rawSessions && rawSessions.length > 0) {
-        for (const s of rawSessions) {
-          if (s.status === "completed") {
-            try {
-              const detail = await getSession(s.id);
-              const allAnswers = detail.questions?.flatMap((q) => q.answers || []) || [];
-              recordSessionInStorage({ ...s, questions: detail.questions, allAnswers });
-            } catch {
-              recordSessionInStorage(s);
-            }
-          } else {
-            recordSessionInStorage(s);
-          }
-        }
-        // Refresh local storage view
-        const stored = getStoredDashboardData(uid);
-        setSessions(stored.sessions);
-        setStats(computeStatsFromSessions(stored.sessions));
+      const res = await fetch("/api/user/dashboard");
+      const json = await res.json();
+      if (res.status === 401 || !json.success) {
+        router.push("/login");
+        return;
       }
-    } catch (e) {
-      console.warn("Background API sync:", e);
+      setData(json);
+    } catch (err) {
+      console.warn("Failed to fetch candidate dashboard:", err);
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [router]);
 
-  // Hydrate immediately from localStorage for the active user
   useEffect(() => {
-    // 1. Check client session
-    const mockUser = getClientMockSession();
-
-    if (!mockUser) {
-      router.push("/login");
-      return;
-    }
-
-    const name =
-      mockUser.user_metadata?.full_name ||
-      mockUser.full_name ||
-      mockUser.email?.split("@")[0] ||
-      "Candidate";
-    setUserName(name);
-    setUserId(mockUser.id);
-    setIsMock(Boolean(mockUser.is_mock));
-
-    // 2. Load stored data for this specific user from localStorage
-    const stored = getStoredDashboardData(mockUser.id);
-    setSessions(stored.sessions);
-    setStats(computeStatsFromSessions(stored.sessions));
-    setLoading(false);
-
-    // 3. Background sync to pull any actual interviews recorded in backend
-    syncBackgroundData(mockUser.id);
-  }, [router, syncBackgroundData]);
-
-  // Handler: Add a quick mock interview session directly to localStorage
-  function handleAddMockInterview() {
-    const roles = [
-      { role: "Senior Distributed Systems Engineer", domain: "Raft, Kafka & Kubernetes", score: 92 },
-      { role: "Frontend Performance Specialist", domain: "Core Web Vitals, Next.js & SSR", score: 86 },
-      { role: "Staff AI Engineer", domain: "Agentic Workflows & Multi-LLM RAG", score: 95 },
-      { role: "Platform Security Engineer", domain: "OAuth 2.1, Zero-Trust & IAM", score: 89 },
-    ];
-    const picked = roles[Math.floor(Math.random() * roles.length)];
-
-    const newSession: EnrichedSession = {
-      id: "session-local-" + Math.random().toString(36).substring(2, 9),
-      user_id: userId || "00000000-0000-0000-0000-000000000000",
-      role: picked.role,
-      domain: picked.domain,
-      status: "completed",
-      overall_score: picked.score,
-      created_at: new Date().toISOString(),
-      completed_at: new Date().toISOString(),
-      questions: [
-        {
-          id: "q-dyn-" + Math.random().toString(36).substring(2, 6),
-          prompt: `How would you evaluate and optimize performance for ${picked.domain}?`,
-          category: "technical",
-          order_index: 0,
-        },
-      ],
-      allAnswers: [
-        {
-          id: "a-dyn-" + Math.random().toString(36).substring(2, 6),
-          question_id: "q-dyn-1",
-          session_id: "temp",
-          answer_text: "Benchmarked latency percentiles (p95, p99), identified bottleneck layers, and implemented horizontal scaling with automated backpressure.",
-          score: picked.score,
-          strengths: ["Clear metrics-driven approach", "System architecture depth"],
-          weaknesses: [],
-        },
-      ],
-    };
-
-    const updatedData = recordSessionInStorage(newSession);
-    setSessions(updatedData.sessions);
-    setStats(computeStatsFromSessions(updatedData.sessions));
-
-    setToastMsg(`+1 Interview Added: "${picked.role}" (Score: ${picked.score}%) saved to localStorage!`);
-    setTimeout(() => setToastMsg(null), 3500);
-  }
-
-  // Handler: Reset localStorage to default showcase data
-  function handleResetDemoData() {
-    const resetData = resetStoredDashboardData(userId || undefined);
-    setSessions(resetData.sessions);
-    setStats(computeStatsFromSessions(resetData.sessions));
-
-    setToastMsg("LocalStorage reset to 3 pristine showcase interviews.");
-    setTimeout(() => setToastMsg(null), 3500);
-  }
+    fetchDashboard();
+  }, [fetchDashboard]);
 
   async function handleSignOut() {
-    setSigningOut(true);
+    try {
+      await fetch("/api/auth/signout", { method: "POST" });
+    } catch (e) {
+      console.warn("Signout fetch warning:", e);
+    }
     const supabase = createSupabaseClient();
     await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
+    router.push("/role-selection");
   }
 
-  // Top weaknesses (max 5)
-  const topWeaknesses = stats
-    ? Object.entries(stats.weaknessAreas)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-    : [];
+  const [clientUser, setClientUser] = useState<string | null>(null);
 
-  // Top strengths (max 3)
-  const topStrengths = stats
-    ? Object.entries(stats.strengthAreas)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-    : [];
+  useEffect(() => {
+    try {
+      const cc = document.cookie
+        .split("; ")
+        .find((row) => row.startsWith("cc_session=") || row.startsWith("mock_user_session="));
+      if (cc) {
+        const val = cc.split("=")[1];
+        const parsed = JSON.parse(decodeURIComponent(val));
+        if (parsed?.full_name && parsed.full_name !== "Candidate") {
+          setClientUser(parsed.full_name);
+        } else if (parsed?.user_metadata?.full_name && parsed.user_metadata.full_name !== "Candidate") {
+          setClientUser(parsed.user_metadata.full_name);
+        }
+      }
+    } catch (e) {}
+  }, []);
+
+  const fullName =
+    data?.user?.fullName && data.user.fullName !== "Candidate"
+      ? data.user.fullName
+      : clientUser || data?.user?.fullName || "Candidate";
+
+  const firstName = fullName.split(" ")[0] || "Candidate";
+  const initials =
+    fullName
+      .split(" ")
+      .map((n: string) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "CN";
+
+  const stats = data?.stats || {
+    interviewsGiven: 0,
+    avgScore: 0,
+    peakScore: 0,
+    questionsDone: 0,
+    questionsHighScored: 0,
+    certificates: 0,
+    totalSessions: 0,
+  };
+
+  const areasToImprove = data?.areasToImprove || [];
+  const topStrengths = data?.topStrengths || [];
+  const scoreByCategory = data?.scoreByCategory || [];
+  const interviewHistory = data?.interviewHistory || [];
+  const inProgressSession = data?.inProgressSession;
+  const availablePrograms = data?.availablePrograms || [];
 
   return (
-    <main className="min-h-screen bg-ink-950 text-chalk-100">
-      {/* Top Header */}
-      <header className="border-b border-chalk-200/10 bg-ink-950/80 backdrop-blur-md sticky top-0 z-10">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
-          <Link
-            href="/"
-            className="font-serif text-xl tracking-tight text-chalk-50 hover:text-amber-500 transition"
-          >
-            Rehearsal
-          </Link>
-          <div className="flex items-center gap-3 sm:gap-4">
-            {isMock && (
-              <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-sans text-amber-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
-                Showcase Mode
-              </span>
-            )}
-            {userName && (
-              <span className="font-sans text-xs text-chalk-200/70 hidden sm:block">
-                👤 {userName}
-              </span>
-            )}
+    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 flex flex-col md:flex-row">
+      {/* Left Sidebar */}
+      <aside className="w-full md:w-56 bg-white border-r border-slate-200/90 flex flex-col justify-between shrink-0 md:h-screen md:sticky md:top-0 z-20 shadow-xs">
+        <div>
+          {/* Logo Header */}
+          <div className="h-14 px-5 border-b border-slate-100 flex items-center gap-2.5 shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md shadow-blue-500/25">
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
+            <span className="font-extrabold text-lg tracking-tight text-slate-900">PrepPilot</span>
+          </div>
+
+          {/* Navigation Links */}
+          <nav className="p-3 space-y-1">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-extrabold bg-blue-50 text-blue-700 shadow-xs border border-blue-100"
+            >
+              <LayoutDashboard className="w-4 h-4 text-blue-600" />
+              <span>Overview</span>
+            </Link>
+            <Link
+              href="/my-learning"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
+            >
+              <GraduationCap className="w-4 h-4 text-slate-400" />
+              <span>My Learning</span>
+            </Link>
             <Link
               href="/upload"
-              className="rounded border border-amber-500 bg-amber-500 px-4 py-2 font-sans text-xs font-semibold text-ink-950 hover:bg-amber-400 transition"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
             >
-              + New Interview
+              <FileCheck className="w-4 h-4 text-slate-400" />
+              <span>Mock Interview</span>
             </Link>
-            <button
-              id="signout-btn"
-              onClick={handleSignOut}
-              disabled={signingOut}
-              className="font-sans text-xs text-chalk-200/50 hover:text-chalk-100 transition disabled:opacity-50"
+            <Link
+              href="/admin/login"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition"
             >
-              {signingOut ? "Signing out…" : "Sign out"}
-            </button>
-          </div>
+              <User className="w-4 h-4 text-slate-400" />
+              <span>Admin Console</span>
+            </Link>
+          </nav>
         </div>
-      </header>
 
-      <div className="mx-auto max-w-5xl px-6 py-10">
-        {/* Toast Alert */}
-        {toastMsg && (
-          <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs font-sans text-amber-300 flex items-center justify-between animate-fade-in shadow-lg">
-            <div className="flex items-center gap-2">
-              <span>💾</span>
-              <span>{toastMsg}</span>
-            </div>
-            <button
-              onClick={() => setToastMsg(null)}
-              className="text-chalk-200/50 hover:text-chalk-100 font-bold ml-4"
-            >
-              ×
-            </button>
+        {/* Account Footer */}
+        <div className="p-3 border-t border-slate-100 space-y-0.5">
+          <p className="px-3 py-1 text-[9px] font-black tracking-widest uppercase text-slate-400">
+            ACCOUNT
+          </p>
+          <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200/60 mb-2">
+            <p className="text-xs font-extrabold text-slate-900 truncate">{fullName}</p>
+            <p className="text-[10px] font-semibold text-blue-600 truncate">{data?.user?.targetRole || "Candidate"}</p>
           </div>
-        )}
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-red-50 hover:text-red-600 transition"
+          >
+            <LogOut className="w-4 h-4 text-slate-400" />
+            <span>Logout</span>
+          </button>
+        </div>
+      </aside>
 
-        {/* Greeting + LocalStorage Action Bar */}
-        <div className="border-b border-chalk-200/10 pb-6 mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <p className="font-sans text-xs uppercase tracking-widest text-amber-400/80">
-                Performance Dashboard
+      {/* Main Container */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen bg-[#F8FAFC]">
+        {/* Top Header */}
+        <header className="h-14 bg-white border-b border-slate-200/90 px-6 flex items-center justify-between shrink-0 sticky top-0 z-10 shadow-xs">
+          <div className="relative w-72 sm:w-80">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search interview tracks, domain skills..."
+              className="w-full rounded-xl bg-slate-50/80 border border-slate-200 pl-9 pr-3 py-1.5 text-xs text-slate-900 font-medium placeholder-slate-400 focus:bg-white focus:border-blue-600 focus:outline-none transition"
+            />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Link
+              href="/upload"
+              className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-3.5 py-1.5 text-xs font-extrabold shadow-sm transition flex items-center gap-1.5"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-white" />
+              <span>+ Start Mock Interview</span>
+            </Link>
+
+            <div className="flex items-center gap-2.5 border-l border-slate-200 pl-3">
+              <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 text-white font-extrabold text-[11px] flex items-center justify-center shadow-xs">
+                {initials}
+              </div>
+              <div className="text-left hidden sm:block">
+                <p className="text-xs font-extrabold text-slate-900 leading-none">{fullName}</p>
+                <p className="text-[10px] font-semibold text-slate-400 mt-0.5">Learner</p>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Content Area */}
+        <main className="flex-1 p-4 sm:p-6 bg-[#F8FAFC] flex flex-col gap-6 min-h-[calc(100vh-56px)]">
+          {/* Greeting Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0">
+            <div>
+              <h1 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+                Welcome back, {fullName} 👋
+              </h1>
+              <p className="text-xs font-semibold text-slate-500 mt-0.5">
+                Target Track: <strong className="text-blue-700 font-extrabold">{data?.user?.targetRole || "Software Engineer"}</strong> · Real Database Analytics Active
               </p>
-              <span className="inline-flex items-center gap-1 rounded bg-ink-800 px-2 py-0.5 text-[10px] font-sans text-chalk-200/60 border border-chalk-200/10">
-                💾 LocalStorage Sync Active
+            </div>
+            <span className="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-3.5 py-1.5 rounded-xl shadow-xs self-start sm:self-auto flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Live Database Feed
+            </span>
+          </div>
+
+          {/* Active Session Notice Card (if any) */}
+          {inProgressSession && (
+            <div className="bg-amber-50/80 rounded-2xl border border-amber-200 p-4 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shrink-0">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md">
+                    SESSION IN PROGRESS
+                  </span>
+                  <h3 className="text-sm font-black text-slate-900 mt-1">{inProgressSession.role}</h3>
+                  <p className="text-xs text-slate-600">
+                    Domain: {inProgressSession.domain || "General"} · Started {new Date(inProgressSession.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </div>
+              </div>
+              <Link
+                href={`/interview/${inProgressSession.id}`}
+                className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl px-4 py-2 text-xs font-extrabold flex items-center gap-1.5 shadow-xs transition self-start sm:self-auto"
+              >
+                <span>Resume Interview</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )}
+
+          {/* SECTION 1: 4 Performance KPI Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+            {/* Interviews Given */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs flex flex-col justify-between">
+              <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                INTERVIEWS GIVEN
+              </p>
+              <div className="mt-2">
+                <p className="text-3xl font-black text-slate-900 tracking-tight">{stats.interviewsGiven}</p>
+                <p className="text-[11px] font-bold text-slate-400 mt-1">
+                  {stats.interviewsGiven} completed in database
+                </p>
+              </div>
+            </div>
+
+            {/* Average Score */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs flex flex-col justify-between">
+              <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                AVG SCORE
+              </p>
+              <div className="mt-2">
+                <p className="text-3xl font-black text-blue-600 tracking-tight">{stats.avgScore}%</p>
+                <p className="text-[11px] font-bold text-slate-400 mt-1">
+                  Across completed interviews
+                </p>
+              </div>
+            </div>
+
+            {/* Peak Score */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs flex flex-col justify-between">
+              <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                PEAK SCORE
+              </p>
+              <div className="mt-2">
+                <p className="text-3xl font-black text-emerald-600 tracking-tight">{stats.peakScore}%</p>
+                <p className="text-[11px] font-bold text-slate-400 mt-1">
+                  Personal best
+                </p>
+              </div>
+            </div>
+
+            {/* Questions Done */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-xs flex flex-col justify-between">
+              <p className="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                QUESTIONS DONE
+              </p>
+              <div className="mt-2">
+                <p className="text-3xl font-black text-indigo-600 tracking-tight">{stats.questionsDone}</p>
+                <p className="text-[11px] font-bold text-slate-400 mt-1">
+                  {stats.questionsHighScored} scored ≥ 75
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 2: Areas to Improve & Top Strengths */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Areas to Improve */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                <h2 className="text-xs font-black uppercase tracking-wider text-rose-600">
+                  AREAS TO IMPROVE
+                </h2>
+              </div>
+
+              <div className="space-y-2.5 flex-1">
+                {areasToImprove.length === 0 ? (
+                  <div className="py-6 text-center text-xs font-semibold text-slate-400">
+                    No critical weaknesses flagged yet. Complete AI mock interviews to generate diagnostic feedback.
+                  </div>
+                ) : (
+                  areasToImprove.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-rose-50/50 rounded-xl p-3 border border-rose-100/80 flex items-center justify-between text-xs"
+                    >
+                      <p className="font-semibold text-slate-800 leading-snug pr-2 truncate">
+                        {item.text}
+                      </p>
+                      <span className="text-[10px] font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md shrink-0">
+                        x{item.count}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Top Strengths */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                <h2 className="text-xs font-black uppercase tracking-wider text-emerald-600">
+                  TOP STRENGTHS
+                </h2>
+              </div>
+
+              <div className="space-y-2.5 flex-1">
+                {topStrengths.length === 0 ? (
+                  <div className="py-6 text-center text-xs font-semibold text-slate-400">
+                    Key strengths will be highlighted automatically as you practice AI mock interviews.
+                  </div>
+                ) : (
+                  topStrengths.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-emerald-50/50 rounded-xl p-3 border border-emerald-100/80 flex items-center justify-between text-xs"
+                    >
+                      <p className="font-semibold text-slate-800 leading-snug pr-2 truncate">
+                        {item.text}
+                      </p>
+                      <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md shrink-0">
+                        x{item.count}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 3: Score by Category */}
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs">
+            <h2 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4">
+              SCORE BY CATEGORY
+            </h2>
+
+            <div className="space-y-4">
+              {scoreByCategory.map((cat, idx) => {
+                const barColor =
+                  cat.score >= 70
+                    ? "bg-emerald-500"
+                    : cat.score >= 45
+                    ? "bg-amber-500"
+                    : "bg-rose-500";
+
+                const textColor =
+                  cat.score >= 70
+                    ? "text-emerald-600"
+                    : cat.score >= 45
+                    ? "text-amber-600"
+                    : "text-rose-600";
+
+                return (
+                  <div key={idx} className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-slate-800">{cat.name}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`font-black ${textColor}`}>{cat.score}%</span>
+                        <span className="text-[10px] font-semibold text-slate-400">({cat.questionCount}q)</span>
+                      </div>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        style={{ width: `${Math.max(cat.score, 5)}%` }}
+                        className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* SECTION 4: Interview History */}
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-black text-slate-900">
+                Interview History ({interviewHistory.length})
+              </h2>
+              <span className="text-[10px] font-semibold text-slate-400">
+                Persisted in Supabase PostgreSQL
               </span>
             </div>
-            <h1 className="font-serif text-3xl text-chalk-50">
-              {userName ? `Good to see you, ${userName.split(" ")[0]}` : "Your Dashboard"}
-            </h1>
-            <p className="mt-1.5 font-sans text-sm text-chalk-200/60">
-              Track your interviews, scores, and areas to improve over time.
-            </p>
-          </div>
 
-          {/* Interactive Showcase Buttons */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              id="add-mock-interview-btn"
-              onClick={handleAddMockInterview}
-              className="rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-1.5 font-sans text-xs font-medium text-amber-300 transition flex items-center gap-1.5"
-            >
-              <span>⚡</span>
-              <span>+ Add Mock Interview</span>
-            </button>
-            <button
-              type="button"
-              id="reset-demo-data-btn"
-              onClick={handleResetDemoData}
-              className="rounded-lg border border-chalk-200/15 bg-ink-800/60 hover:bg-ink-800 px-3 py-1.5 font-sans text-xs font-medium text-chalk-200/70 hover:text-chalk-100 transition"
-              title="Reset localStorage data to 3 demo sessions"
-            >
-              ↺ Reset Demo
-            </button>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center gap-3 text-chalk-200/50 py-12">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
-            <span className="font-sans text-sm">Loading your data…</span>
-          </div>
-        ) : (
-          <>
-            {/* Stats Grid: Number of Interviews Given and All */}
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-8">
-              <StatCard
-                label="Interviews Given"
-                value={stats?.totalSessions ?? 0}
-                sub={`${stats?.completedSessions ?? 0} completed · in localStorage`}
-                accent="chalk"
-              />
-              <StatCard
-                label="Avg Score"
-                value={stats?.avgScore != null ? `${stats.avgScore}%` : "—"}
-                sub="Across completed interviews"
-                accent="amber"
-              />
-              <StatCard
-                label="Peak Score"
-                value={stats?.topScore != null ? `${stats.topScore}%` : "—"}
-                sub="Personal best"
-                accent="moss"
-              />
-              <StatCard
-                label="Questions Done"
-                value={stats?.totalQuestionsAnswered ?? 0}
-                sub={`${stats?.highScoreAnswers ?? 0} scored ≥ 75`}
-                accent="amber"
-              />
-            </div>
-
-            {/* Areas to Improve + Strengths */}
-            {(topWeaknesses.length > 0 || topStrengths.length > 0) && (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
-                {/* Areas to Improve */}
-                {topWeaknesses.length > 0 && (
-                  <div className="rounded-xl border border-clay-500/20 bg-ink-900 p-5">
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="h-2 w-2 rounded-full bg-clay-500" />
-                      <h2 className="font-sans text-xs uppercase tracking-widest text-clay-400">
-                        Areas to Improve
-                      </h2>
-                    </div>
-                    <ul className="space-y-2">
-                      {topWeaknesses.map(([text, count]) => (
-                        <li key={text} className="flex items-center justify-between gap-3">
-                          <span className="font-sans text-sm text-chalk-200/80 capitalize line-clamp-1">
-                            {text}
-                          </span>
-                          <span className="shrink-0 rounded-full bg-clay-500/15 border border-clay-500/20 px-2 py-0.5 font-sans text-[10px] text-clay-400">
-                            ×{count}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Top Strengths */}
-                {topStrengths.length > 0 && (
-                  <div className="rounded-xl border border-moss-500/20 bg-ink-900 p-5">
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="h-2 w-2 rounded-full bg-moss-500" />
-                      <h2 className="font-sans text-xs uppercase tracking-widest text-moss-500">
-                        Top Strengths
-                      </h2>
-                    </div>
-                    <ul className="space-y-2">
-                      {topStrengths.map(([text, count]) => (
-                        <li key={text} className="flex items-center justify-between gap-3">
-                          <span className="font-sans text-sm text-chalk-200/80 capitalize line-clamp-1">
-                            {text}
-                          </span>
-                          <span className="shrink-0 rounded-full bg-moss-500/15 border border-moss-500/20 px-2 py-0.5 font-sans text-[10px] text-moss-500">
-                            ×{count}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Category Breakdown */}
-            {stats && Object.keys(stats.categoryBreakdown).length > 0 && (
-              <div className="rounded-xl border border-chalk-200/10 bg-ink-900 p-5 mb-8">
-                <h2 className="font-sans text-xs uppercase tracking-widest text-chalk-200/50 mb-4">
-                  Score by Category
-                </h2>
-                <div className="space-y-3">
-                  {Object.entries(stats.categoryBreakdown)
-                    .sort((a, b) => b[1].total - a[1].total)
-                    .map(([cat, { total, avgScore }]) => (
-                      <div key={cat} className="flex items-center gap-3">
-                        <span className="font-sans text-xs text-chalk-200/70 capitalize w-36 shrink-0 truncate">
-                          {cat.replace(/[-_]/g, " ")}
-                        </span>
-                        <div className="flex-1 h-2 rounded-full bg-ink-800 overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all duration-700"
-                            style={{
-                              width: `${avgScore}%`,
-                              backgroundColor:
-                                avgScore >= 80
-                                  ? "#5C7A5A"
-                                  : avgScore >= 60
-                                  ? "#C88A2E"
-                                  : "#B5563C",
-                            }}
-                          />
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span
-                            className="font-serif text-sm"
-                            style={{
-                              color:
-                                avgScore >= 80
-                                  ? "#5C7A5A"
-                                  : avgScore >= 60
-                                  ? "#C88A2E"
-                                  : "#B5563C",
-                            }}
-                          >
-                            {avgScore}%
-                          </span>
-                          <span className="font-sans text-[10px] text-chalk-200/30">
-                            ({total}q)
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+            <div className="space-y-3">
+              {interviewHistory.length === 0 ? (
+                <div className="py-8 text-center text-xs font-semibold text-slate-400">
+                  <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  No completed interviews recorded yet. Click <strong>+ Start Mock Interview</strong> above to begin!
                 </div>
-              </div>
-            )}
-
-            {/* Interview History */}
-            <div>
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="font-serif text-xl text-chalk-50">
-                  Interview History ({sessions.length})
-                </h2>
-                <span className="text-xs font-sans text-chalk-200/40">
-                  Persisted in Browser LocalStorage
-                </span>
-              </div>
-
-              {sessions.length === 0 && (
-                <div className="rounded-xl border border-dashed border-chalk-200/15 bg-ink-900/50 p-10 text-center">
-                  <p className="font-serif text-lg text-chalk-100">
-                    No interviews yet
-                  </p>
-                  <p className="mt-1 font-sans text-sm text-chalk-200/60">
-                    Upload your resume or click &quot;+ Add Mock Interview&quot; above to simulate an interview.
-                  </p>
-                  <div className="mt-6 flex items-center justify-center gap-3">
-                    <button
-                      onClick={handleAddMockInterview}
-                      className="rounded bg-amber-500 px-4 py-2 font-sans text-xs font-semibold text-ink-950 hover:bg-amber-400 transition"
-                    >
-                      ⚡ Add Mock Interview
-                    </button>
-                    <Link
-                      href="/upload"
-                      className="rounded border border-chalk-200/20 bg-ink-800 px-4 py-2 font-sans text-xs font-medium text-chalk-100 hover:bg-ink-700 transition"
-                    >
-                      Upload Resume →
-                    </Link>
-                  </div>
-                </div>
-              )}
-
-              <div className="divide-y divide-chalk-200/10 border-t border-chalk-200/10">
-                {sessions.map((s) => {
-                  const answersCount = s.allAnswers?.length ?? 0;
-                  const highCount = s.allAnswers?.filter((a) => (a.score ?? 0) >= 75).length ?? 0;
+              ) : (
+                interviewHistory.map((item) => {
+                  const scoreVal = item.overallScore;
+                  const badgeBorder =
+                    scoreVal != null && scoreVal >= 75
+                      ? "border-emerald-500 text-emerald-700 bg-emerald-50"
+                      : scoreVal != null && scoreVal >= 50
+                      ? "border-amber-500 text-amber-700 bg-amber-50"
+                      : "border-rose-500 text-rose-700 bg-rose-50";
 
                   return (
                     <Link
-                      key={s.id}
-                      href={`/interview/${s.id}`}
-                      className="group flex items-center justify-between py-4 px-3 rounded-lg hover:bg-ink-900/70 transition"
+                      key={item.id}
+                      href={`/interview/${item.id}`}
+                      className="group bg-slate-50/70 hover:bg-slate-100/90 rounded-2xl p-4 border border-slate-200/80 transition flex items-center justify-between"
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-serif text-base text-chalk-50 group-hover:text-amber-400 transition">
-                            {s.role}
-                          </p>
-                          {s.domain && (
-                            <span className="rounded bg-ink-800 px-2 py-0.5 font-sans text-[10px] text-chalk-200/60 border border-chalk-200/10">
-                              {s.domain}
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-extrabold text-slate-900 group-hover:text-blue-600 transition">
+                            {item.role}
+                          </h3>
+                          {item.domain && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
+                              {item.domain}
                             </span>
                           )}
                           <span
-                            className={`rounded-full px-2 py-0.5 font-sans text-[10px] border capitalize ${
-                              s.status === "completed"
-                                ? "bg-moss-500/10 text-moss-500 border-moss-500/20"
-                                : s.status === "in_progress"
-                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                : "bg-chalk-200/5 text-chalk-200/40 border-chalk-200/10"
+                            className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                              item.status === "completed"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-amber-100 text-amber-800"
                             }`}
                           >
-                            {s.status.replace("_", " ")}
+                            {item.status}
                           </span>
                         </div>
-                        <div className="flex items-center gap-3 mt-1">
-                          <p className="font-sans text-xs text-chalk-200/40">
-                            {new Date(s.created_at).toLocaleDateString(undefined, {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            })}
-                          </p>
-                          {answersCount > 0 && (
-                            <span className="font-sans text-[11px] text-chalk-200/40">
-                              {answersCount} answered · {highCount} ≥ 75
-                            </span>
-                          )}
-                        </div>
+                        <p className="text-[11px] font-semibold text-slate-400">
+                          {new Date(item.createdAt).toLocaleDateString("en-US", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          })}{" "}
+                          · {item.questionsAnswered} answered · {item.highScoreQuestions} ≥ 75
+                        </p>
                       </div>
 
-                      <div className="flex items-center gap-4 ml-4 shrink-0">
-                        {s.overall_score != null ? (
-                          <div className="relative flex items-center justify-center">
-                            <ScoreRing score={Math.round(s.overall_score)} size={48} />
-                            <span
-                              className="absolute font-serif text-sm"
-                              style={{
-                                color:
-                                  s.overall_score >= 80
-                                    ? "#5C7A5A"
-                                    : s.overall_score >= 60
-                                    ? "#C88A2E"
-                                    : "#B5563C",
-                              }}
-                            >
-                              {Math.round(s.overall_score)}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="font-serif text-xl text-chalk-200/30">—</span>
-                        )}
-                        <span className="text-chalk-200/30 group-hover:text-amber-400 transition text-sm">
-                          →
-                        </span>
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-11 h-11 rounded-full border-2 ${badgeBorder} font-black text-xs flex items-center justify-center shadow-xs shrink-0`}
+                        >
+                          {scoreVal != null ? `${scoreVal}` : "—"}
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-1 transition-transform" />
                       </div>
                     </Link>
                   );
-                })}
-              </div>
+                })
+              )}
             </div>
-          </>
-        )}
+          </div>
+        </main>
       </div>
-    </main>
+    </div>
   );
 }

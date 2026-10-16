@@ -3,12 +3,18 @@ import { NextResponse } from "next/server";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { indexResumeChunks } from "@/lib/pinecone";
 import { storage } from "@/lib/storage";
+import { getAuthenticatedUser } from "@/lib/auth-session";
 
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
-    const userId = (formData.get("userId") as string) || "00000000-0000-0000-0000-000000000000";
+    const authenticated = await getAuthenticatedUser();
+    const paramUserId = formData.get("userId") as string;
+    const userId =
+      paramUserId && paramUserId !== "00000000-0000-0000-0000-000000000000"
+        ? paramUserId
+        : authenticated?.id || "00000000-0000-0000-0000-000000000000";
 
     if (!file) {
       return NextResponse.json({ error: "PDF resume file is required" }, { status: 400 });
